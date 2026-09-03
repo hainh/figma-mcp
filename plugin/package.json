@@ -1,18 +1,22 @@
 {
   "name": "@figma-mcp/plugin",
   "version": "0.1.0",
-  "private": true,
-  "type": "module",
   "description": "Figma plugin runtime for MCP: AST-validated sandboxed execution of AI-generated JavaScript against figma.*",
+  "main": "code.js",
   "scripts": {
-    "build": "esbuild src/main.js --bundle --format=iife --target=es2017 --outfile=dist/main.js && node scripts/harden.mjs",
-    "watch": "node scripts/watch.mjs"
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "watch": "npm run build -- --watch"
   },
-  "dependencies": {
-    "acorn": "^8.12.0"
-  },
+  "author": "",
+  "license": "",
   "devDependencies": {
-    "@figma/plugin-typings": "^1.100.0",
-    "esbuild": "^0.24.0"
+    "@eslint/js": "^9.39.4",
+    "@figma/eslint-plugin-figma-plugins": "*",
+    "@figma/plugin-typings": "^1.137.0",
+    "eslint": "^9.39.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.1"
   }
 }
