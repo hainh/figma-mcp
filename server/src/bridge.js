@@ -9,13 +9,18 @@ import { WebSocketServer } from "ws";
  *  - ping/pong heartbeat: plugin pings every 3s, disconnect after 10s of silence
  *  - execute → log (streaming) → result (a single shape, ok true/false)
  *  - cancel: fire-and-forget from the server
- *  - MVP: ONE plugin connection per server instance at a time; a 2nd connection gets BUSY.
+ *  - ONE active plugin connection per server instance at a time. When a new plugin
+ *    connects it REPLACES the previous one (last-man-wins): the old socket is notified
+ *    with code "REPLACED" and closed with close code REPLACE_CLOSE_CODE, so its UI stops
+ *    auto-reconnecting and shows a "replaced" status instead of kicking the new session.
  *    Run several servers with `figma-mcp <id>` → plugin port 10060 + id.
  */
 
 const PROTOCOL_VERSION = 1;
 const HEARTBEAT_TIMEOUT_MS = 10_000;
 const WATCHDOG_GRACE_MS = 2_000; // server-side watchdog = timeoutMs + grace
+/** Close code telling the plugin UI it was intentionally replaced → do NOT auto-reconnect. */
+const REPLACE_CLOSE_CODE = 4001;
 
 export class FigmaBridge {
   constructor({ port = 10060, id = 0 } = {}) {
@@ -25,8 +30,6 @@ export class FigmaBridge {
     this.client = null; // active WebSocket
     this.hello = null; // plugin metadata
     this.pending = new Map(); // execId -> { resolve, reject, timer, logs }
-    this.lastPongAt = 0;
-    this.heartbeatTimer = null;
     this._seq = 0;
   }
 
@@ -114,7 +117,7 @@ export class FigmaBridge {
   }
 
   stop() {
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    if (this.client) this._teardownHeartbeat(this.client);
     for (const [, entry] of this.pending) clearTimeout(entry.timer);
     this.pending.clear();
     if (this.client) this.client.close();
@@ -124,18 +127,28 @@ export class FigmaBridge {
   // ---------- internals ----------
 
   _onConnection(ws) {
-    if (this.connected) {
-      // MVP: one connection at a time per server instance
-      ws.send(JSON.stringify({ type: "hello", role: "server", protocolVersion: PROTOCOL_VERSION, ok: false, code: "BUSY" }));
-      setTimeout(() => ws.close(4000, "busy"), 200);
-      return;
+    // Per-connection heartbeat bookkeeping lives on the socket itself so that a replaced
+    // connection can never clobber the state of the one that just took over.
+    ws.__lastPongAt = Date.now();
+    ws.__heartbeat = null;
+
+    if (this.connected && this.client !== ws) {
+      // Last-man-wins: accept the newcomer and evict the previous plugin connection.
+      console.error("[figma-mcp] new plugin connected — replacing the previous connection");
+      this._evictClient("REPLACED");
     }
+
     this.client = ws;
-    this.lastPongAt = Date.now();
+    this.hello = null;
     console.error("[figma-mcp] plugin socket opened, waiting for hello");
 
-    this.heartbeatTimer = setInterval(() => {
-      if (this.connected && Date.now() - this.lastPongAt > HEARTBEAT_TIMEOUT_MS) {
+    ws.__heartbeat = setInterval(() => {
+      // Only the socket that is still the active client can trigger a heartbeat drop.
+      if (this.client !== ws) {
+        this._teardownHeartbeat(ws);
+        return;
+      }
+      if (Date.now() - ws.__lastPongAt > HEARTBEAT_TIMEOUT_MS) {
         console.error("[figma-mcp] heartbeat lost, dropping plugin connection");
         ws.terminate();
       }
@@ -146,6 +159,48 @@ export class FigmaBridge {
     ws.on("error", () => this._onClose(ws));
   }
 
+  /**
+   * Notify the currently-active client that it has been replaced and close its socket.
+   * Uses REPLACE_CLOSE_CODE so the plugin UI knows NOT to auto-reconnect (avoids a loop).
+   */
+  _evictClient(code) {
+    const old = this.client;
+    if (!old) return;
+    // Detach first so the close event doesn't wipe the state of the incoming session.
+    this.client = null;
+    this._teardownHeartbeat(old);
+    try {
+      if (old.readyState === 1 /* OPEN */) {
+        old.send(JSON.stringify({ type: "hello", role: "server", protocolVersion: PROTOCOL_VERSION, ok: false, code }));
+      }
+    } catch {
+      /* socket may already be gone */
+    }
+    try {
+      old.close(REPLACE_CLOSE_CODE, "replaced");
+    } catch {
+      try { old.terminate(); } catch { /* already closed */ }
+    }
+    this.hello = null;
+    this._failPending("Another plugin instance connected and took over this server.");
+  }
+
+  _teardownHeartbeat(ws) {
+    if (ws && ws.__heartbeat) {
+      clearInterval(ws.__heartbeat);
+      ws.__heartbeat = null;
+    }
+  }
+
+  /** Resolve all in-flight executions with a DISCONNECTED-style error. */
+  _failPending(error) {
+    for (const [id, entry] of this.pending) {
+      clearTimeout(entry.timer);
+      entry.resolve({ ok: false, code: "DISCONNECTED", error, logs: entry.logs });
+      this.pending.delete(id);
+    }
+  }
+
   _onMessage(ws, raw) {
     let msg;
     try {
@@ -154,7 +209,7 @@ export class FigmaBridge {
       return; // malformed message — ignore
     }
     if (ws !== this.client) return;
-    this.lastPongAt = Date.now();
+    ws.__lastPongAt = Date.now();
 
     switch (msg.type) {
       case "hello": {
@@ -196,23 +251,11 @@ export class FigmaBridge {
   }
 
   _onClose(ws) {
-    if (ws !== this.client) return;
+    this._teardownHeartbeat(ws);
+    if (ws !== this.client) return; // a replaced/duplicate socket — leave the active session alone
     this.client = null;
     this.hello = null;
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
-    for (const [id, entry] of this.pending) {
-      clearTimeout(entry.timer);
-      entry.resolve({
-        ok: false,
-        code: "DISCONNECTED",
-        error: "Plugin disconnected while execution was running.",
-        logs: entry.logs,
-      });
-      this.pending.delete(id);
-    }
+    this._failPending("Plugin disconnected while execution was running.");
     console.error("[figma-mcp] plugin disconnected");
   }
 

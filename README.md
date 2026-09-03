@@ -132,7 +132,7 @@ Mặc định **Auto-run OFF**: mỗi lệnh `execute` hiện code + nút **Run/
 
 ## Limitations đã biết (MVP)
 
-- 1 plugin connection tại một thời điểm **cho mỗi server instance** (connection thứ 2 nhận `BUSY`). Muốn cắm nhiều plugin song song → chạy nhiều server với id khác nhau (`figma-mcp 1`, `figma-mcp 2`, …).
+- 1 plugin connection **active** tại một thời điểm **cho mỗi server instance** — kết nối mới sẽ **thay thế** (replace) kết nối cũ theo cơ chế last-man-wins (socket cũ đóng bằng close code `4001`, UI báo "Replaced", không tự reconnect). Muốn cắm nhiều plugin song song → chạy nhiều server với id khác nhau (`figma-mcp 1`, `figma-mcp 2`, …).
 - ⚠️ **Bảo mật**: mặc định HTTP bind `0.0.0.0` và **không có auth** — bất kỳ máy nào trong LAN/mạng gọi được cổng 10030+id đều có thể execute code trong Figma của bạn. Ở mạng không tin cậy: chạy sau firewall/VPN, hoặc `--host 127.0.0.1` rồi tunnel (ssh -L). Bridge WS của plugin cũng đang mở `0.0.0.0`.
 - Proxy chỉ đếm `figma.create*` top-level; `node.clone()` không đếm (vẫn bị giới hạn timeout tổng).
 - Sync recursion vô hạn không cắt được bằng tick (loop mới được instrument) — server watchdog trả `DISCONNECTED`, cần reload plugin.

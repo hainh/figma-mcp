@@ -77,6 +77,7 @@ const BANNED_FIGMA_PROPS: ReadonlySet<string> = new Set([
   "settings",
   "notify",
   "once",
+  "on",
   "off",
   "emit",
   "fileKey",
@@ -203,10 +204,36 @@ export function validateAndInstrument(source: string): InstrumentedCode {
   }
 
   // ---- 2. instrument loops (timeout/cancel/command budget) ----
-  const loops: Node[] = [];
-  walkNodes(ast, (node) => {
-    if (LOOP_TYPES.has(node.type)) loops.push(node);
-  });
+  // Loop nằm trong function KHÔNG async → chèn `__guard.tickSync()` (không có `await`).
+  // Chèn `await` vào sync function sẽ nổ SyntaxError làm chết cả run.
+  const FUNCTION_TYPES: ReadonlySet<string> = new Set([
+    "FunctionDeclaration",
+    "FunctionExpression",
+    "ArrowFunctionExpression",
+  ]);
+  interface LoopSite {
+    node: Node;
+    syncScope: boolean;
+  }
+  const loops: LoopSite[] = [];
+  (function rec(node: unknown, syncDepth: number): void {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const child of node) rec(child, syncDepth);
+      return;
+    }
+    const n = node as { type?: unknown; async?: boolean } & Record<string, unknown>;
+    if (typeof n.type !== "string") return;
+    let depth = syncDepth;
+    if (FUNCTION_TYPES.has(n.type)) {
+      depth = n.async ? 0 : syncDepth + 1;
+    }
+    if (LOOP_TYPES.has(n.type)) loops.push({ node: node as Node, syncScope: depth > 0 });
+    for (const key of Object.keys(n)) {
+      if (key === "type" || key === "loc" || key === "start" || key === "end") continue;
+      rec(n[key], depth);
+    }
+  })(ast as unknown, 0);
 
   interface Edit {
     start: number;
@@ -214,8 +241,8 @@ export function validateAndInstrument(source: string): InstrumentedCode {
     text: string;
   }
   const edits: Edit[] = [];
-  const TICK = " await __guard.tick();";
-  for (const loop of loops) {
+  for (const { node: loop, syncScope } of loops) {
+    const TICK = syncScope ? " __guard.tickSync();" : " await __guard.tick();";
     const body = (loop as unknown as { body?: Node }).body;
     if (!body || body.start == null || body.end == null) continue;
     if (body.type === "BlockStatement") {
@@ -249,6 +276,8 @@ function staticPropertyName(memberNode: MemberExpression): string | null | typeo
   }
   const p = memberNode.property;
   if (p.type === "Literal" && typeof p.value === "string") return p.value;
+  // Numeric literal index (arr[0], gradientStops[1]...) là static access an toàn → cho qua.
+  if (p.type === "Literal" && typeof p.value === "number") return null;
   return DYNAMIC;
 }
 

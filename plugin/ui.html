@@ -108,6 +108,10 @@
               setStatus(false, "Server still holds the old connection — retrying…");
               hardClose();
               scheduleRetry();
+            } else if (msg.ok === false && msg.code === "REPLACED") {
+              // Another plugin took over this server → stop retrying, wait for a manual Reconnect.
+              hardClose();
+              replaced();
             } else {
               serverVersion = msg.protocolVersion;
               setStatus(true, "Connected · ws://localhost:" + wsPort + " · protocol v" + serverVersion);
@@ -116,7 +120,20 @@
           }
           parent.postMessage({ pluginMessage: { kind: "ws-message", data: ev.data } }, "*");
         };
-        ws.onclose = () => { if (ws) { setStatus(false, "Disconnected — retrying…"); wsIdx++; cleanup(); scheduleReconnect(); } };
+        ws.onclose = (ev) => {
+          if (!ws) return;
+          wsIdx++;
+          cleanup();
+          // 4001 = server intentionally replaced us with a newer plugin connection.
+          // Do NOT auto-reconnect (that would kick the new session and loop forever);
+          // the user can press "↻ Reconnect" to take the connection back.
+          if (ev && ev.code === 4001) {
+            replaced();
+            return;
+          }
+          setStatus(false, "Disconnected — retrying…");
+          scheduleReconnect();
+        };
         ws.onerror = () => { wsIdx++; cleanup(); /* onclose fires right after */ };
       }
       function cleanup() { if (pingTimer) { clearInterval(pingTimer); pingTimer = null; } }
@@ -134,6 +151,17 @@
         if (!reconnectTimer) reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, RECONNECT_MS);
       }
       function scheduleRetry() { if (!retryTimer) retryTimer = setTimeout(() => { retryTimer = null; connect(); }, 2000); }
+
+      // Connection was taken over by another plugin instance: no auto-reconnect, show a clear state.
+      function replaced() {
+        wsConnected = false;
+        serverVersion = null;
+        clearTimers();
+        retryMode = "loop";
+        failedTries = 0;
+        ws = null;
+        setStatus(false, "Replaced by another plugin instance — press ↻ Reconnect to take over.");
+      }
 
       function startPing() {
         if (pingTimer) clearInterval(pingTimer);

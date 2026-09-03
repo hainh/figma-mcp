@@ -3,7 +3,8 @@
  * KHÔNG BAO GIỜ gọi hàm này với code chưa qua validator.
  *
  * Environment inject vào `new Function`:
- *   figma    → Proxy bọc figma.* (count create*, block props)
+ *   figma    → sandbox object kế thừa figma.* (Object.create — ĐỪNG dùng new Proxy,
+ *              xem buildSandboxFigma để biết lý do realm-shim "inconsistent get")
  *   console  → capture logs (stream về server + gom vào result)
  *   helpers  → createText (auto load font), ...
  *   __guard  → tick() được AST chèn vào mọi loop: timeout / cancel / budget
@@ -19,14 +20,6 @@ export class ExecutionError extends Error {
     this.code = code;
   }
 }
-
-const HAS_PROXY = (() => {
-  try {
-    return typeof new Proxy({} as object, {}) === "object";
-  } catch {
-    return false;
-  }
-})();
 
 // ==================== types ====================
 
@@ -157,17 +150,31 @@ export async function runCode(rawCode: string, limits: Limits, hooks: RunHooks =
     debug: (...a: unknown[]) => pushLog("debug", a),
   };
 
-  // ---- figma proxy: đếm create*, chặn figma.ui/showUI/settings ----
+ // ---- figma sandbox: đếm create*, chặn props nhạy cảm ----
+  // QUAN TRỌNG: KHÔNG bọc figma bằng `new Proxy` — trong plugin sandbox, `figma`
+  // đã là proxy của Figma realm-shim, và shim enforce: get trap phải trả đúng giá trị
+  // của target[prop], nếu không sẽ nổ `TypeError: proxy: inconsistent get` khi đọc BẤT KỲ
+  // method create* nào (wrapCreate trả function mới ⇒ khác target) → mọi lệnh tạo node fail.
+  // Giải pháp: Object.create(figma) + own properties (prototype delegation) — không proxy lồng.
   const BLOCKED_FIGMA_PROPS: ReadonlySet<string> = new Set([
     "ui",
     "showUI",
     "settings",
     "fileKey",
     "once",
+    "on",
     "off",
     "emit",
+    "notify",
     "triggerError",
   ]);
+  // Fallback nếu Object.keys(figma) không enumerate được; list đầy đủ lấy động từ figma.
+  const CREATE_METHODS_STATIC = [
+    "createRectangle", "createEllipse", "createLine", "createPolygon", "createStar",
+    "createText", "createFrame", "createComponent", "createComponentSet", "createSection",
+    "createSlice", "createPage", "createNodeFromSvg", "createImage", "createImageAsync",
+    "createVariable", "createVariableCollection", "createVariableMode",
+  ] as const;
   let createdCount = 0;
   const wrapCreate = (fn: (...args: unknown[]) => unknown) =>
     function (this: unknown, ...args: unknown[]): unknown {
@@ -194,20 +201,55 @@ export async function runCode(rawCode: string, limits: Limits, hooks: RunHooks =
       return record(result);
     };
 
-  const sandboxFigma: PluginAPI = HAS_PROXY
-    ? new Proxy(figma, {
-        get(target: PluginAPI, prop: string | symbol) {
-          if (typeof prop === "string" && BLOCKED_FIGMA_PROPS.has(prop)) {
-            throw new ExecutionError("POLICY", `figma.${prop} is blocked`);
-          }
-          const val = Reflect.get(target, prop, target);
-          if (typeof prop === "string" && prop.startsWith("create") && typeof val === "function") {
-            return wrapCreate(val as (...args: unknown[]) => unknown);
-          }
-          return val;
+  const buildSandboxFigma = (): PluginAPI => {
+    const sandbox = Object.create(figma) as unknown as Record<string, unknown>;
+    const names = new Set<string>(CREATE_METHODS_STATIC);
+    try {
+      for (const k of Object.keys(figma as unknown as object)) {
+        if (k.startsWith("create")) names.add(k);
+      }
+    } catch {
+      /* không enumerate được (intercom proxy) — dùng static list */
+    }
+    for (const name of names) {
+      const original = (figma as unknown as Record<string, unknown>)[name];
+      if (typeof original !== "function") continue;
+      // Dùng defineProperty (KHÔNG dùng `sandbox[name] = ...`): các method create* trên
+      // figma là read-only → assignment trong strict-mode ném "X is read-only" khi
+      // prototype (figma) có own property non-writable. defineProperty bỏ qua check này.
+      Object.defineProperty(sandbox, name, {
+        value: wrapCreate(original as (...args: unknown[]) => unknown),
+        writable: false,
+        enumerable: true,
+        configurable: true,
+      });
+    }
+    for (const prop of BLOCKED_FIGMA_PROPS) {
+      Object.defineProperty(sandbox, prop, {
+        configurable: false,
+        enumerable: false,
+        get(): never {
+          throw new ExecutionError("POLICY", `figma.${prop} is blocked`);
         },
-      })
-    : figma; // fallback: không có Proxy thì chỉ còn validator + guard
+        set(): never {
+          throw new ExecutionError("POLICY", `figma.${prop} is blocked`);
+        },
+      });
+    }
+    return sandbox as unknown as PluginAPI;
+  };
+
+  let sandboxFigma: PluginAPI;
+  try {
+    sandboxFigma = buildSandboxFigma();
+  } catch (e) {
+    const err = e as { message?: string; stack?: string };
+    pushLog("warn", [
+      `figma sandbox build failed → falling back to raw figma (create*/budget tracking disabled). ` +
+        `Reason: ${err?.message ?? String(e)}${err?.stack ? "\n" + String(err.stack).split("\n").slice(0, 4).join("\n") : ""}`,
+    ]);
+    sandboxFigma = figma; // fallback: chỉ còn validator (static) + guard — vẫn chạy được
+  }
 
   // ---- helpers (phần "ergonomics" đáng giá nhất: font) ----
   const DEFAULT_FONT = { family: "Inter", style: "Regular" };

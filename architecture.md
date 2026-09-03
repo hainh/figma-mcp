@@ -446,7 +446,7 @@ hello    ping/pong    execute    result    log    cancel    canceled
 1. **Mọi message gắn với một execution đều có `id`** — kể cả `log`.
 2. **Chỉ có 1 result shape:** error không phải message riêng — nằm trong `result` với `ok: false`. Message `error` riêng bị loại để khỏi mơ nghĩa. `cancel` là message riêng (fire-and-forget từ server), plugin trả về `result` với `ok:false, code:"CANCELLED"`.
 3. **Heartbeat:** plugin gửi `ping` mỗi 3s; server coi như disconnect sau 10s không có ping. Server trả `pong`.
-4. **Một kết nối tại một thời điểm:** kết nối thứ 2 bị từ chối với `code: "BUSY"` (MVP). Capability `multipleClients` để sau này.
+4. **Một kết nối active tại một thời điểm (last-man-wins):** server chỉ giữ 1 plugin connection mỗi instance. Khi plugin mới kết nối, nó **thay thế** kết nối cũ: server gửi `hello` với `code: "REPLACED"` rồi đóng socket cũ bằng close code `4001`. Plugin bị thay thế **không tự reconnect vòng lặp** (UI hiển thị "Replaced…" và chờ bấm ↻ Reconnect để giành lại kết nối). Capability `multipleClients` để sau này.
 
 Ví dụ:
 

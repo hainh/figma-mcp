@@ -57,6 +57,19 @@ for (const k in {}) { }`);
 ok((inst.code.match(/__guard\.tick\(\)/g) || []).length === 4, "instruments all 4 loops");
 ok(inst.loopsInstrumented === 4, "loop count reported");
 
+ok(inst.code.match(/__guard\.tick\(\)/g) !== null, "async loops use await tick");
+
+{
+  // loop trong callback sync (forEach/map...) → phải dùng tickSync, KHÔNG chèn await (SyntaxError)
+  const syncInst = validateAndInstrument(`[1,2,3].forEach((x) => { for (let i = 0; i < x; i++) {} });`);
+  ok(syncInst.code.includes("__guard.tickSync()") && !syncInst.code.includes("await __guard"), "sync-callback loop uses tickSync");
+  const mixedInst = validateAndInstrument(`async function f() { while (true) {} }
+while (false) {}`);
+  ok((mixedInst.code.match(/await __guard\.tick\(\)/g) || []).length === 2 && !mixedInst.code.includes("f() { __guard"), "async fns keep await tick");
+  const syncFnInst = validateAndInstrument(`function g() { for (;;) {} }`);
+  ok(syncFnInst.code.includes("g() {  __guard.tickSync();") || syncFnInst.code.includes("__guard.tickSync()"), "plain sync function loop uses tickSync");
+}
+
 await expectReject("rejects fetch", () => validateAndInstrument(`fetch("https://evil.com")`));
 await expectReject("rejects eval", () => validateAndInstrument(`eval("1+1")`));
 await expectReject("rejects Function ctor", () => validateAndInstrument(`new Function("return 1")()`));
@@ -65,8 +78,10 @@ await expectReject("rejects dynamic import", () => validateAndInstrument(`import
 await expectReject("rejects prototype escape", () => validateAndInstrument(`"".constructor.constructor("return this")()`));
 await expectReject("rejects __proto__ string access", () => validateAndInstrument(`obj["__proto__"]`));
 await expectReject("rejects dynamic computed access", () => validateAndInstrument(`obj[key]`));
+ok(validateAndInstrument(`arr[0]; obj["prop"]; stops[1].color`).code.length > 0, "allows numeric + string-literal index access");
 await expectReject("rejects this", () => validateAndInstrument(`this.foo`));
 await expectReject("rejects figma.ui", () => validateAndInstrument(`figma.ui.postMessage({})`));
+await expectReject("rejects figma.on", () => validateAndInstrument(`figma.on("currentpagechange", () => {})`));
 await expectReject("rejects globalThis", () => validateAndInstrument(`globalThis.Object`));
 await expectReject("rejects bad syntax", () => validateAndInstrument(`const = ;`));
 
@@ -128,6 +143,17 @@ console.log("executor:");
   // helpers.createText fallback font khi font lỗi
   const r = await runCode(`const t = await helpers.createText("Hi", { fontName: { family: "MissingFont", style: "Bold" } }); return t.name;`, { timeoutMs: 5000, maxNodes: 10, maxCommands: 100 });
   ok(r.ok === true, "createText falls back when font missing");
+}
+
+{
+  const r = await runCode(`let n = 0; [1,2,3].forEach(() => { for (let i = 0; i < 2; i++) n++; }); return n;`, { timeoutMs: 5000, maxNodes: 10, maxCommands: 1000 });
+  ok(r.ok === true && r.value === 6, "loops inside sync callbacks run (no SyntaxError from instrumentation)");
+}
+
+{
+  // sandbox không được làm mất side-effect của create* (regression: Proxy "inconsistent get")
+  const r = await runCode(`const a = figma.createFrame(); const b = figma.createText(); return typeof a.resize;`, { timeoutMs: 5000, maxNodes: 10, maxCommands: 100 });
+  ok(r.ok === true && r.value === "function" && r.createdNodes.length === 2, "create* wrappers work and are tracked");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

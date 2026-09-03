@@ -2,6 +2,8 @@
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import http from "node:http";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -165,6 +167,11 @@ Figma JS runtime rules (the code you write runs inside the Figma plugin main thr
 - Blocked (validation error POLICY): fetch, XMLHttpRequest, WebSocket, eval, Function, require, import(),
   globalThis, prototype-chain access (.constructor/.prototype/__proto__), dynamic obj[expr], figma.ui/showUI/settings.
 - Prefer returning a small JSON summary: return { created: [...ids], page: figma.currentPage.name };
+- Screenshot/export pattern: node.exportAsync({ format: 'PNG'|'JPG' }) returns bytes; figma.base64Encode(bytes)
+  returns a base64 string. Pass savePath to execute_code and the SERVER writes the decoded image to disk —
+  the huge string never round-trips through the model. Example:
+    const bytes = await node.exportAsync({ format: 'JPG', quality: 80 }); return figma.base64Encode(bytes);
+  with { savePath: "/abs/path/out.jpg" } → result.value = { savedTo, bytes }.
 `.trim();
 
 const tools = [
@@ -185,6 +192,11 @@ ${EXECUTE_SYSTEM_PROMPT}`,
         timeoutMs: { type: "number", description: "Max execution time enforced inside the plugin (default 5000, max 60000)." },
         maxNodes: { type: "number", description: "Max figma.create* calls allowed (default 1000)." },
         maxCommands: { type: "number", description: "Max guarded loop iterations/commands (default 10000)." },
+        savePath: {
+          type: "string",
+          description:
+            "Optional absolute file path. When the code returns a base64 string (e.g. from exportAsync + figma.base64Encode), the server decodes it and writes the file to disk instead of returning the payload inline. Returns { savedTo, bytes }.",
+        },
       },
       required: ["code"],
       additionalProperties: false,
@@ -242,6 +254,24 @@ function createMcpServer() {
             maxNodes: args.maxNodes,
             maxCommands: args.maxCommands,
           });
+          // savePath: decode a base64 result to disk server-side (image exports never round-trip the model)
+          if (
+            typeof args.savePath === "string" &&
+            args.savePath.trim() &&
+            result &&
+            result.ok === true &&
+            typeof result.value === "string"
+          ) {
+            try {
+              const buf = Buffer.from(result.value, "base64");
+              if (!buf.length) throw new Error("empty payload after base64 decode");
+              mkdirSync(dirname(args.savePath), { recursive: true });
+              writeFileSync(args.savePath, buf);
+              result.value = { savedTo: args.savePath, bytes: buf.length };
+            } catch (e) {
+              result.value = { saveError: String((e && e.message) || e) };
+            }
+          }
           return jsonResult(result);
         }
 

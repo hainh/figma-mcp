@@ -270,10 +270,19 @@ function buildHello(): UiPayload {
     pluginName: PLUGIN_NAME,
     pluginVersion: PLUGIN_VERSION,
     protocolVersion: PROTOCOL_VERSION,
-    fileKey: typeof figma.fileKey === "string" ? figma.fileKey : null,
+    // fileKey throws/null under documentAccess "dynamic-page" until pages are loaded — never let it kill the handshake
+    fileKey: safeFileKey(),
     fileName: figma.root.name,
     autoRun,
   };
+}
+
+function safeFileKey(): string | null {
+  try {
+    return typeof figma.fileKey === "string" ? figma.fileKey : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizePort(value: unknown): number {
