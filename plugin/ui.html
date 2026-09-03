@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        --bg: #1e1e1e;
+        --panel: #2a2a2a;
+        --border: #3c3c3c;
+        --text: #e6e6e6;
+        --dim: #9a9a9a;
+        --ok: #4caf50;
+        --err: #e5534b;
+        --warn: #d29922;
+        --accent: #0d8a72;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; font-size: 12px; }
+      body { font-family: Inter, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+      header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+      .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--err); flex-shrink: 0; }
+      .dot.on { background: var(--ok); }
+      #status { flex: 1; color: var(--dim); }
+      label.toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+      main { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+      .card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
+      .card.approval { border-color: var(--warn); }
+      .card h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--dim); margin-bottom: 6px; }
+      pre.code { background: #171717; border-radius: 4px; padding: 8px; max-height: 180px; overflow: auto; font-family: Menlo, Consolas, monospace; font-size: 11px; white-space: pre-wrap; }
+      pre.logs { max-height: 140px; overflow: auto; font-family: Menlo, Consolas, monospace; font-size: 11px; white-space: pre-wrap; }
+      pre.logs .err { color: var(--err); }
+      pre.logs .ok { color: var(--ok); }
+      .row { display: flex; gap: 8px; margin-top: 8px; }
+      button { border: none; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-weight: 600; }
+      header button { padding: 4px 10px; font-size: 11px; flex-shrink: 0; }
+      .run { background: var(--accent); color: white; }
+      .reject { background: #4a4a4a; color: var(--text); }
+      .meta { color: var(--dim); margin-top: 6px; }
+      footer { padding: 8px 12px; border-top: 1px solid var(--border); color: var(--dim); }
+      input[type="checkbox"] { accent-color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="dot" id="dot"></div>
+      <div id="status">Connecting to ws://localhost:3055…</div>
+      <button id="reconnect" class="reject" title="Đóng kết nối hiện tại và thử lại ngay">↻ Reconnect</button>
+      <label class="toggle" title="Tắt = mỗi run phải bấm Run thủ công (human-in-the-loop)">
+        <input type="checkbox" id="autorun" /> Auto-run
+      </label>
+    </header>
+    <main id="feed"></main>
+    <footer>
+      MCP: <code>figma-mcp</code> · plugin giữ kết nối WebSocket tới MCP server; mọi code AI được AST-validate trước khi chạy.
+    </footer>
+
+    <script>
+      // localhost có thể resolve ra ::1 trong khi server listen IPv4 → fallback 127.0.0.1
+      const WS_URLS = ["ws://localhost:3055", "ws://127.0.0.1:3055"];
+      let wsIdx = 0;
+      const PING_MS = 3000;
+      const RECONNECT_MS = 2500;
+
+      const dot = document.getElementById("dot");
+      const statusEl = document.getElementById("status");
+      const feed = document.getElementById("feed");
+      const autorunBox = document.getElementById("autorun");
+
+      let ws = null;
+      let pingTimer = null;
+      let reconnectTimer = null;
+      let wsConnected = false; // so với lần open trước → chỉ báo main gửi hello lại khi reconnect THAT
+      let serverVersion = null;
+      let retryTimer = null;
+
+      function setStatus(on, text) {
+        dot.classList.toggle("on", !!on);
+        statusEl.textContent = text;
+      }
+
+      function connect() {
+        const url = WS_URLS[wsIdx % WS_URLS.length];
+        try { ws = new WebSocket(url); } catch (e) { scheduleReconnect(); return; }
+        ws.onopen = () => {
+          const reconnected = wsConnected; // open không phải lần đầu
+          wsConnected = true;
+          setStatus(true, "Connected to MCP server");
+          // main cần hello mới cho mỗi WS session → báo lại sau khi handshake xong
+          parent.postMessage({ pluginMessage: { kind: reconnected ? "ws-reconnected" : "ws-connected" } }, "*");
+          startPing();
+        };
+        ws.onmessage = (ev) => {
+          let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+          if (msg.type === "pong") return;                      // heartbeat tự xử lý
+          if (msg.type === "hello" && msg.role === "server") {  // handshake
+            if (msg.ok === false && msg.code === "BUSY") {
+              // Server còn giữ socket cũ (half-open) — self-heal: đóng + reconnect có backoff
+              setStatus(false, "Server đang giữ kết nối cũ — thử lại…");
+              hardClose();
+              scheduleRetry();
+            } else {
+              serverVersion = msg.protocolVersion;
+              setStatus(true, "Connected · protocol v" + serverVersion);
+            }
+            return;                                            // KHÔNG forward hello/pong xuống main
+          }
+          parent.postMessage({ pluginMessage: { kind: "ws-message", data: ev.data } }, "*");
+        };
+        ws.onclose = () => { if (ws) { setStatus(false, "Disconnected — retrying…"); wsIdx++; cleanup(); scheduleReconnect(); } };
+        ws.onerror = () => { wsIdx++; cleanup(); /* onclose sẽ bắn sau */ };
+      }
+      function cleanup() { if (pingTimer) { clearInterval(pingTimer); pingTimer = null; } }
+      function scheduleReconnect() { if (!reconnectTimer) reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, RECONNECT_MS); }
+      function scheduleRetry() { if (!retryTimer) retryTimer = setTimeout(() => { retryTimer = null; connect(); }, 2000); }
+
+      function startPing() {
+        if (pingTimer) clearInterval(pingTimer);
+        pingTimer = setInterval(() => {
+          if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "ping", t: Date.now() }));
+        }, PING_MS);
+      }
+
+      function hardClose() {
+        // đóng socket không kích hoạt onclose→reconnect tự động (caller tự lên lịch)
+        if (ws) { try { ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null; ws.close(); } catch {}
+          ws = null; }
+        cleanup();
+      }
+
+      // ===== Nút Reconnect: đóng kết nối hiện tại (kể cả nửa sống nửa chết) + bắt tay lại từ đầu =====
+      const reconnectBtn = document.getElementById("reconnect");
+      reconnectBtn.onclick = () => {
+        hardClose();
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+        serverVersion = null;
+        setStatus(false, "Reconnecting…");
+        connect(); // onopen sẽ báo ws-reconnected → main gửi hello mới
+      };
+
+      // main → ws
+      onmessage = (ev) => {
+        const m = ev.data && ev.data.pluginMessage;
+        if (!m) return;
+        switch (m.kind) {
+          case "to-ws":
+            if (ws && ws.readyState === 1) ws.send(m.payload);
+            // hiển thị local để user thấy log/result của run
+            try {
+              const p = JSON.parse(m.payload);
+              if (p.type === "log") appendLog(p.id, "[" + p.level + "] " + (p.args || []).join(" "));
+              if (p.type === "result") appendLog(p.id, (p.ok ? "✔ done" : "✖ " + p.code + ": " + p.error), p.ok ? "ok" : "err");
+            } catch { /* ignore */ }
+            break;
+          case "connection":
+            if (m.status === "busy") setStatus(false, m.message);
+            else if (m.status === "connected") setStatus(true, "Connected · " + m.server);
+            else if (m.status === "closed") setStatus(false, "Disconnected — retrying…");
+            break;
+          case "approval-request": renderApproval(m); break;
+          case "run-started": markRunning(m.id); break;
+          case "run-finished": markFinished(m); break;
+          case "autorun-changed": autorunBox.checked = m.value; break;
+        }
+      };
+
+      autorunBox.onchange = () => parent.postMessage({ pluginMessage: { kind: "set-autorun", value: autorunBox.checked } }, "*");
+
+      // ---------- render ----------
+      const cards = new Map();
+
+      function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+
+      function ensureRunCard(id) {
+        if (cards.has(id)) return cards.get(id);
+        const card = el("div", "card");
+        card.appendChild(el("h3", null, "Execution " + id));
+        const logs = el("pre", "logs");
+        card.appendChild(logs);
+        feed.appendChild(card);
+        const entry = { card, logs };
+        cards.set(id, entry);
+        return entry;
+      }
+
+      function appendLog(id, line, cls) {
+        const c = ensureRunCard(id);
+        const span = el("span", cls, line + "\n");
+        c.logs.appendChild(span);
+        c.logs.scrollTop = c.logs.scrollHeight;
+      }
+
+      function renderApproval(m) {
+        const card = el("div", "card approval");
+        card.appendChild(el("h3", null, "⚠ Approval required — " + m.file));
+        card.appendChild(el("pre", "code", m.code));
+        card.appendChild(el("div", "meta", "timeout " + m.limits.timeoutMs + "ms · max " + m.limits.maxNodes + " nodes · " + m.limits.maxCommands + " commands"));
+        const row = el("div", "row");
+        const runBtn = el("button", "run", "Run");
+        const rejectBtn = el("button", "reject", "Reject");
+        runBtn.onclick = () => { parent.postMessage({ pluginMessage: { kind: "approval", id: m.id, approved: true } }, "*"); row.remove(); appendLog(m.id, "▶ started by user", "ok"); };
+        rejectBtn.onclick = () => { parent.postMessage({ pluginMessage: { kind: "approval", id: m.id, approved: false } }, "*"); row.remove(); appendLog(m.id, "✖ rejected by user", "err"); };
+        row.appendChild(runBtn); row.appendChild(rejectBtn);
+        card.appendChild(row);
+        feed.appendChild(card);
+        cards.set(m.id, { card, logs: null });
+      }
+      function markRunning(id) {
+        const entry = cards.get(id);
+        if (entry && entry.card.classList.contains("approval")) entry.card.classList.remove("approval");
+      }
+      function markFinished(m) {
+        appendLog(m.id, m.ok ? "✔ " + m.summary : "✖ " + m.summary, m.ok ? "ok" : "err");
+      }
+
+      connect();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "@figma-mcp/plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Figma plugin runtime for MCP: AST-validated sandboxed execution of AI-generated JavaScript against figma.*",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --format=iife --target=es2017 --outfile=dist/main.js && node scripts/harden.mjs",
+    "watch": "node scripts/watch.mjs"
+  },
+  "dependencies": {
+    "acorn": "^8.12.0"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.100.0",
+    "esbuild": "^0.24.0"
+  }
+}

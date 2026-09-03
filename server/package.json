@@ -1,0 +1,21 @@
+{
+  "name": "@figma-mcp/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server bridging AI agents to the Figma plugin runtime over localhost WebSocket",
+  "main": "src/index.js",
+  "bin": {
+    "figma-mcp-server": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

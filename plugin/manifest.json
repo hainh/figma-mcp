@@ -1,0 +1,7 @@
+{
+  "name": "Figma MCP Connector",
+  "api": "1.0.0",
+  "main": "dist/main.js",
+  "ui": "ui.html",
+  "editorType": ["figma"]
+}
