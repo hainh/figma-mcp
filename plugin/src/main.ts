@@ -1,8 +1,8 @@
 /**
  * Figma Plugin — Main Thread
  *
- * Nhận message từ UI (WS bridge + approval), validate + execute code AI, trả result về UI.
- * Protocol: xem architecture.md § Quy tắc protocol.
+ * Receives messages from the UI (WS bridge + approval), validates and executes AI-generated
+ * code, then returns the result to the UI. Protocol: see architecture.md (protocol rules).
  */
 import { runCode, createControlToken, safeStringify, type ControlToken, type Limits } from "./executor.ts";
 import { validateAndInstrument, ValidationError } from "./validator.ts";
@@ -10,6 +10,9 @@ import { validateAndInstrument, ValidationError } from "./validator.ts";
 const PROTOCOL_VERSION = 1;
 const PLUGIN_NAME = "Figma MCP Connector";
 const PLUGIN_VERSION = "0.1.0";
+/** Default WebSocket port of the MCP server (plugin side) = 10060 + serverId. */
+const DEFAULT_WS_PORT = 10060;
+const WS_PORT_KEY = "wsPort";
 
 // ==================== protocol types ====================
 
@@ -21,19 +24,19 @@ type UiToMainMessage =
   | { kind: "ws-closed" }
   | { kind: "ws-message"; data: string }
   | { kind: "approval"; id: string; approved: boolean }
-  | { kind: "set-autorun"; value: unknown };
+  | { kind: "set-port"; value: unknown };
 
-/** Message server → plugin (qua UI websocket). */
+/** Message server → plugin (over the UI websocket). */
 type ServerMessage =
   | { type: "hello"; role?: string; ok?: boolean; code?: string; protocolVersion?: number }
   | { type: "execute"; id: string; code: string; limits?: Partial<Limits> }
   | { type: "cancel"; id: string }
   | { type: "pong" };
 
-/** Payload plugin → UI. */
+/** Message main → UI. */
 type UiPayload = Record<string, unknown>;
 
-/** Result payload plugin → server (qua UI "to-ws"). */
+/** Result payload plugin → server (via UI "to-ws"). */
 interface ResultPayload {
   type: "result" | "log";
   id: string;
@@ -60,22 +63,25 @@ interface InFlightRun {
 
 figma.showUI(__html__, { width: 380, height: 520 });
 
-/** Auto-run ON mặc định — user có thể tắt để bật human-in-the-loop; state lưu qua clientStorage. */
-const AUTORUN_KEY = "autorun";
-let autoRun = true;
+/** Bridge port chosen by the user (persisted via clientStorage) — the UI connects to this port. */
+let wsPort = DEFAULT_WS_PORT;
 
-//Khôi phục trạng thái auto-run đã lưu (figma.clientStorage persist qua phiên)
+/** Auto-run is always ON — no toggle in the UI, every run executes immediately. */
+const autoRun = true;
+
 figma.clientStorage
-  .getAsync(AUTORUN_KEY)
+  .getAsync(WS_PORT_KEY)
   .then((v) => {
-    if (typeof v === "boolean" && v !== autoRun) {
-      autoRun = v;
-      notifyUi({ kind: "autorun-changed", value: autoRun });
-    }
+    const port = normalizePort(v);
+    if (port !== wsPort) wsPort = port;
+    // The UI waits for this config to know which port to connect to (fallback: DEFAULT_WS_PORT in the UI)
+    notifyUi({ kind: "config", port: wsPort, defaultPort: DEFAULT_WS_PORT });
   })
-  .catch(() => {});
+  .catch(() => {
+    notifyUi({ kind: "config", port: wsPort, defaultPort: DEFAULT_WS_PORT });
+  });
 
-/** execId → run đang chờ approval hoặc đang chạy */
+/** execId → run that is awaiting approval or currently running */
 const inFlight = new Map<string, InFlightRun>();
 
 // ================= UI → MAIN =================
@@ -86,8 +92,8 @@ figma.ui.onmessage = async (msg: UiToMainMessage) => {
     case "ws-connected":
     case "ui-ready":
     case "ws-reconnected": {
-      // UI mở / reconnect WS thành công → gửi (hoặc gửi lại) hello với metadata file.
-      // Server cần hello mới vì connection WS mới = session mới.
+      // UI opened / reconnected the WS successfully → send (or re-send) hello with file metadata.
+      // The server needs a fresh hello because a new WS connection = a new session.
       sendToWs(buildHello());
       return;
     }
@@ -130,10 +136,11 @@ figma.ui.onmessage = async (msg: UiToMainMessage) => {
       return;
     }
 
-    case "set-autorun": {
-      autoRun = Boolean(msg.value);
-      notifyUi({ kind: "autorun-changed", value: autoRun });
-      figma.clientStorage.setAsync(AUTORUN_KEY, autoRun).catch(() => {});
+    case "set-port": {
+      const next = normalizePort(msg.value);
+      wsPort = next;
+      notifyUi({ kind: "port-changed", port: next, defaultPort: DEFAULT_WS_PORT });
+      figma.clientStorage.setAsync(WS_PORT_KEY, next).catch(() => {});
       return;
     }
   }
@@ -183,7 +190,7 @@ function handleServerMessage(msg: ServerMessage): void {
     }
 
     case "pong":
-      return; // UI tự xử lý heartbeat
+      return; // the UI handles heartbeat itself
   }
 }
 
@@ -202,7 +209,7 @@ function onExecuteRequest(msg: Extract<ServerMessage, { type: "execute" }>): voi
   };
   inFlight.set(id, run);
 
-  // Pre-validate nhanh để hiện lỗi sớm trong UI + tiết kiệm round-trip approval cho code rác
+  // Quick pre-validation to surface errors early in the UI + save an approval round-trip for garbage code
   try {
     validateAndInstrument(code);
   } catch (e) {
@@ -269,6 +276,12 @@ function buildHello(): UiPayload {
   };
 }
 
+function normalizePort(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_WS_PORT;
+  return Math.max(1, Math.min(65535, Math.round(n)));
+}
+
 function normalizeLimits(limits: Partial<Limits> = {}): Limits {
   const num = (v: unknown, dflt: number, min: number, max: number): number => {
     const n = Number(v);
@@ -293,7 +306,7 @@ function notifyUi(payload: UiPayload): void {
   try {
     figma.ui.postMessage(payload);
   } catch {
-    /* UI có thể đã đóng */
+    /* the UI may already be closed */
   }
 }
 

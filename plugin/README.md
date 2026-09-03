@@ -52,8 +52,9 @@ npm run map-stack  # map stack trace "code.js:line:col" từ Figma console về 
 
 1. `npm run build` (hoặc `npm run watch` trong lúc dev).
 2. Figma → Plugins → Development → Import plugin from manifest → chọn `plugin/manifest.json`.
-3. Chạy MCP server (`npm run start:server` ở thư mục cha) rồi mở plugin, kết nối WS tới
-   `ws://localhost:3055` (đổi cổng qua `FIGMA_MCP_PORT`) từ UI panel.
+3. Chạy MCP server (`npm run start:server` ở thư mục cha, hoặc `figma-mcp <id>`) rồi mở plugin;
+   UI connect tới `ws://localhost:10060+id` — đặt cổng trong ô **MCP server port** (mặc định `10060`,
+   lưu qua `figma.clientStorage`). Ví dụ `figma-mcp 1` → nhập `10061`.
 
 ## Ghi chú
 
@@ -63,5 +64,6 @@ npm run map-stack  # map stack trace "code.js:line:col" từ Figma console về 
   từ chối; `harden.mjs` sẽ fail build nếu phát hiện pattern sống.
 - `ui.html` được khai báo trong `manifest.json` (`"ui": "ui.html"`); main thread gọi
   `figma.showUI(__html__)`.
-- `manifest.json → networkAccess.allowedDomains` liệt kê `ws://localhost:3055` /
-  `ws://127.0.0.1:3055`. Nếu đổi cổng server qua `FIGMA_MCP_PORT` → cập nhật manifest theo.
+- `manifest.json → networkAccess.allowedDomains` là `*` nên mọi cổng localhost đều được phép.
+  Nếu siết lại thành danh sách cụ thể thì phải liệt kê đủ dải sẽ dùng, ví dụ
+  `ws://localhost:10060`…`ws://localhost:10069` (mỗi server `figma-mcp <id>` chiếm một cổng).

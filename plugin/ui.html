@@ -16,11 +16,11 @@
       }
       * { box-sizing: border-box; margin: 0; padding: 0; font-size: 12px; }
       body { font-family: Inter, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
-      header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+      header { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+      footer { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
       .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--err); flex-shrink: 0; }
       .dot.on { background: var(--ok); }
       #status { flex: 1; color: var(--dim); }
-      label.toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
       main { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
       .card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
       .card.approval { border-color: var(--warn); }
@@ -35,40 +35,48 @@
       .run { background: var(--accent); color: white; }
       .reject { background: #4a4a4a; color: var(--text); }
       .meta { color: var(--dim); margin-top: 6px; }
-      footer { padding: 8px 12px; border-top: 1px solid var(--border); color: var(--dim); }
-      input[type="checkbox"] { accent-color: var(--accent); }
+      /* footer { padding: 8px 12px; border-top: 1px solid var(--border); color: var(--dim); } */
+      .conn { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+      input[type="number"] { width: 74px; background: #171717; color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-size: 11px; }
+      input[type="number"]:focus { outline: 1px solid var(--accent); }
+      .port-label { color: var(--dim); font-size: 11px; }
+      .save { background: #3a3a3a; color: var(--text); }
     </style>
   </head>
   <body>
     <header>
-      <div class="dot" id="dot"></div>
-      <div id="status">Connecting to ws://localhost:3055…</div>
-      <button id="reconnect" class="reject" title="Đóng kết nối hiện tại và thử lại ngay">↻ Reconnect</button>
-      <label class="toggle" title="Mặc định bật auto-run. Tắt = mỗi run phải bấm Run thủ công (human-in-the-loop). Trạng thái được lưu qua figma.clientStorage">
-        <input type="checkbox" id="autorun" checked /> Auto-run
-      </label>
+      <div class="conn" title="WebSocket port of figma-mcp (= 10060 + server id). Example: figma-mcp 1 → 10061, figma-mcp 2 → 10062. One plugin connects to one port only — edit the field (Enter) to change it.">
+        <span class="port-label">MCP server port</span>
+        <input type="number" id="port" min="1" max="65535" step="1" value="10060" />
+        <button id="reconnect" class="save" title="Close the current connection and reconnect to the same port">↻ Reconnect</button>
+      </div>
     </header>
     <main id="feed"></main>
     <footer>
-      Running
+      <div class="dot" id="dot"></div>
+      <div id="status">Waiting for server config…</div>
     </footer>
 
     <script>
-      // localhost có thể resolve ra ::1 trong khi server listen IPv4 → fallback 127.0.0.1
-      const WS_URLS = ["ws://localhost:3055", "ws://127.0.0.1:3055"];
+      // localhost may resolve to ::1 while the server listens on IPv4 → fall back to 127.0.0.1
+      const DEFAULT_PORT = 10060;
+      let wsPort = DEFAULT_PORT; // port actually in use (main thread sends the persisted value)
+      const wsUrls = () => [`ws://localhost:${wsPort}`, `ws://127.0.0.1:${wsPort}`];
       let wsIdx = 0;
       const PING_MS = 3000;
       const RECONNECT_MS = 2500;
+      const CONFIG_WAIT_MS = 600; // wait for main to send the saved port, otherwise use the default
 
+      // Auto-run is always ON (no toggle in the UI).
       const dot = document.getElementById("dot");
       const statusEl = document.getElementById("status");
       const feed = document.getElementById("feed");
-      const autorunBox = document.getElementById("autorun");
+      const portInput = document.getElementById("port");
 
       let ws = null;
       let pingTimer = null;
       let reconnectTimer = null;
-      let wsConnected = false; // so với lần open trước → chỉ báo main gửi hello lại khi reconnect THAT
+      let wsConnected = false; // compared with the previous open → tells main to re-send hello only on a REAL reconnect
       let serverVersion = null;
       let retryTimer = null;
 
@@ -78,38 +86,53 @@
       }
 
       function connect() {
-        const url = WS_URLS[wsIdx % WS_URLS.length];
+        const url = wsUrls()[wsIdx % wsUrls().length];        if (!/^\d+$/.test(String(wsPort))) { setStatus(false, "Invalid port"); return; }
+        setStatus(false, "Connecting to " + url + "…");
         try { ws = new WebSocket(url); } catch (e) { scheduleReconnect(); return; }
         ws.onopen = () => {
-          const reconnected = wsConnected; // open không phải lần đầu
+          const reconnected = wsConnected; // not the first open
           wsConnected = true;
+          retryMode = "loop"; failedTries = 0; // connected → back to endless retry for future drops
           setStatus(true, "Connected to MCP server");
-          // main cần hello mới cho mỗi WS session → báo lại sau khi handshake xong
+          wsIdx = 0; // opened fine → next attempt starts from localhost again
+          // main needs a fresh hello per WS session → report once the handshake is done
           parent.postMessage({ pluginMessage: { kind: reconnected ? "ws-reconnected" : "ws-connected" } }, "*");
           startPing();
         };
         ws.onmessage = (ev) => {
           let msg; try { msg = JSON.parse(ev.data); } catch { return; }
-          if (msg.type === "pong") return;                      // heartbeat tự xử lý
+          if (msg.type === "pong") return;                      // heartbeat handled here
           if (msg.type === "hello" && msg.role === "server") {  // handshake
             if (msg.ok === false && msg.code === "BUSY") {
-              // Server còn giữ socket cũ (half-open) — self-heal: đóng + reconnect có backoff
-              setStatus(false, "Server đang giữ kết nối cũ — thử lại…");
+              // Server still holds the old (half-open) socket — self-heal: close + retry with backoff
+              setStatus(false, "Server still holds the old connection — retrying…");
               hardClose();
               scheduleRetry();
             } else {
               serverVersion = msg.protocolVersion;
-              setStatus(true, "Connected · protocol v" + serverVersion);
+              setStatus(true, "Connected · ws://localhost:" + wsPort + " · protocol v" + serverVersion);
             }
             return;                                            // KHÔNG forward hello/pong xuống main
           }
           parent.postMessage({ pluginMessage: { kind: "ws-message", data: ev.data } }, "*");
         };
         ws.onclose = () => { if (ws) { setStatus(false, "Disconnected — retrying…"); wsIdx++; cleanup(); scheduleReconnect(); } };
-        ws.onerror = () => { wsIdx++; cleanup(); /* onclose sẽ bắn sau */ };
+        ws.onerror = () => { wsIdx++; cleanup(); /* onclose fires right after */ };
       }
       function cleanup() { if (pingTimer) { clearInterval(pingTimer); pingTimer = null; } }
-      function scheduleReconnect() { if (!reconnectTimer) reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, RECONNECT_MS); }
+      // retryMode: "loop" = keep retrying the current port forever (startup / Reconnect)
+      //            "limited" = user set a new port → after PORT_TRY_LIMIT failures stay Disconnected (no retry, NEVER falls back to the old port)
+      let retryMode = "loop";
+      let failedTries = 0;
+      const PORT_TRY_LIMIT = 3;
+      function scheduleReconnect() {
+        if (retryMode === "limited" && failedTries >= PORT_TRY_LIMIT) {
+          setStatus(false, "Disconnected — no server at port " + wsPort + ". Edit the port or press Reconnect.");
+          return;
+        }
+        failedTries++;
+        if (!reconnectTimer) reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, RECONNECT_MS);
+      }
       function scheduleRetry() { if (!retryTimer) retryTimer = setTimeout(() => { retryTimer = null; connect(); }, 2000); }
 
       function startPing() {
@@ -120,22 +143,11 @@
       }
 
       function hardClose() {
-        // đóng socket không kích hoạt onclose→reconnect tự động (caller tự lên lịch)
+        // closing the socket without triggering onclose→auto-reconnect (caller schedules it)
         if (ws) { try { ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null; ws.close(); } catch {}
           ws = null; }
         cleanup();
       }
-
-      // ===== Nút Reconnect: đóng kết nối hiện tại (kể cả nửa sống nửa chết) + bắt tay lại từ đầu =====
-      const reconnectBtn = document.getElementById("reconnect");
-      reconnectBtn.onclick = () => {
-        hardClose();
-        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-        if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
-        serverVersion = null;
-        setStatus(false, "Reconnecting…");
-        connect(); // onopen sẽ báo ws-reconnected → main gửi hello mới
-      };
 
       // main → ws
       onmessage = (ev) => {
@@ -144,7 +156,7 @@
         switch (m.kind) {
           case "to-ws":
             if (ws && ws.readyState === 1) ws.send(m.payload);
-            // hiển thị local để user thấy log/result của run
+            // echo locally so the user sees log/result of the run
             try {
               const p = JSON.parse(m.payload);
               if (p.type === "log") appendLog(p.id, "[" + p.level + "] " + (p.args || []).join(" "));
@@ -153,17 +165,75 @@
             break;
           case "connection":
             if (m.status === "busy") setStatus(false, m.message);
-            else if (m.status === "connected") setStatus(true, "Connected · " + m.server);
+            else if (m.status === "connected") setStatus(true, "Connected · ws://localhost:" + wsPort + " · " + m.server);
             else if (m.status === "closed") setStatus(false, "Disconnected — retrying…");
+            break;
+          case "config": // main sends the persisted port (clientStorage)
+            applyPort(m.port, { fromMain: true });
+            break;
+          case "port-changed":
+            applyPort(m.port, { fromMain: true });
             break;
           case "approval-request": renderApproval(m); break;
           case "run-started": markRunning(m.id); break;
           case "run-finished": markFinished(m); break;
-          case "autorun-changed": autorunBox.checked = m.value; break;
         }
       };
 
-      autorunBox.onchange = () => parent.postMessage({ pluginMessage: { kind: "set-autorun", value: autorunBox.checked } }, "*");
+      // ---------- connection port ----------
+      function sanitizePort(v) {
+        const n = Math.round(Number(v));
+        return Number.isFinite(n) && n >= 1 && n <= 65535 ? n : null;
+      }
+
+      function applyPort(raw, opts = {}) {
+        const port = sanitizePort(raw);
+        if (port === null) {
+          portInput.value = String(wsPort);
+          setStatus(false, "Invalid port (1–65535)");
+          return;
+        }
+        portInput.value = String(port);
+        if (port === wsPort && started) return; // unchanged → keep the connection
+        wsPort = port;
+        if (!started) { start(); return; }
+        // port really changed → drop the old connection and reconnect on the new port
+        hardClose();
+        clearTimers();
+        wsIdx = 0;
+        serverVersion = null;
+        if (opts.fromMain) {
+          connect();
+        } else {
+          // user action → persist via main (clientStorage) then reconnect on the NEW port only
+          parent.postMessage({ pluginMessage: { kind: "set-port", value: port } }, "*");
+          retryMode = "limited";
+          failedTries = 0;
+          connect();
+        }
+      }
+
+      // ===== Reconnect button: close the current socket and reconnect to the SAME port (endless retry) =====
+      const reconnectBtn = document.getElementById("reconnect");
+      reconnectBtn.onclick = () => {
+        const typed = sanitizePort(portInput.value);
+        if (typed !== null && typed !== wsPort) { applyPort(typed); return; } // typed port not applied yet → apply it (limited mode)
+        hardClose();
+        clearTimers();
+        wsIdx = 0;
+        serverVersion = null;
+        retryMode = "loop";
+        failedTries = 0;
+        setStatus(false, "Reconnecting…");
+        connect(); // onopen reports ws-reconnected → main sends a fresh hello
+      };
+
+      function clearTimers() {
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+      }
+
+      portInput.onkeydown = (ev) => { if (ev.key === "Enter") applyPort(portInput.value); };
 
       // ---------- render ----------
       const cards = new Map();
@@ -212,7 +282,16 @@
         appendLog(m.id, m.ok ? "✔ " + m.summary : "✖ " + m.summary, m.ok ? "ok" : "err");
       }
 
-      connect();
+      // ---------- start: wait for main to report the saved port (fall back to the default after CONFIG_WAIT_MS) ----------
+      let started = false;
+      function start() {
+        if (started) return;
+        started = true;
+        connect();
+      }
+      setTimeout(() => {
+        if (!started) applyPort(DEFAULT_PORT);
+      }, CONFIG_WAIT_MS);
     </script>
   </body>
 </html>

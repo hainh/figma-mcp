@@ -2,7 +2,7 @@
   "name": "figma-mcp",
   "version": "0.1.0",
   "type": "module",
-  "description": "MCP server bridging AI agents to the Figma plugin runtime over localhost WebSocket. Installs a `figma-mcp` CLI command.",
+  "description": "MCP server bridging AI agents to the Figma plugin runtime: remote MCP over Streamable HTTP (port 10030+id) plus a WebSocket bridge for the Figma plugin (port 10060+id). Installs a `figma-mcp` CLI command.",
   "keywords": [
     "mcp",
     "model-context-protocol",

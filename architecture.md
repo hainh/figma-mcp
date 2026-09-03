@@ -497,11 +497,11 @@ Ví dụ:
 
 ### Mixed content `ws://localhost`
 
-Plugin UI chạy trong trang `https://figma.com` nhưng mở `ws://localhost:3055`. Hầu hết browser hiện đại coi `localhost` là potentially trustworthy nên **chạy được** (đã được các project cùng loại xác nhận). Nếu môi trường nào chặn:
+Plugin UI chạy trong trang `https://figma.com` nhưng mở `ws://localhost:10060+id`. Hầu hết browser hiện đại coi `localhost` là potentially trustworthy nên **chạy được** (đã được các project cùng loại xác nhận). Nếu môi trường nào chặn:
 
 - Fallback 1: dùng **Figma Desktop app** (bypass được một số hạn chế web).
 - Fallback 2: serve **wss://** với self-signed cert + hướng dẫn user accept cert một lần.
-- Ghi chú cổng mặc định **3055**, cấu hình được qua plugin UI.
+- Ghi chú cổng mặc định **10060** cho plugin (MCP client dùng **10030**, Streamable HTTP); cả hai cộng thêm `id` khi chạy `figma-mcp <id>`, và cổng plugin cấu hình được qua UI.
 
 ---
 

@@ -2,14 +2,15 @@ import { randomUUID } from "node:crypto";
 import { WebSocketServer } from "ws";
 
 /**
- * FigmaBridge — WebSocket hub giữa MCP Server và Figma Plugin.
+ * FigmaBridge — WebSocket hub between the MCP server and the Figma plugin.
  *
- * Protocol (xem architecture.md § Quy tắc protocol):
- *  - hello handshake, plugin gửi khi connect (kèm fileKey/fileName/protocolVersion)
- *  - ping/pong heartbeat: plugin ping mỗi 3s, disconnect sau 10s im lặng
- *  - execute → log (streaming) → result (1 shape duy nhất, ok true/false)
- *  - cancel: fire-and-forget từ server
- *  - MVP: 1 plugin connection tại 1 thời điểm, connection thứ 2 bị từ chối BUSY
+ * Protocol (see architecture.md § protocol rules):
+ *  - hello handshake, sent by the plugin on connect (fileKey/fileName/protocolVersion)
+ *  - ping/pong heartbeat: plugin pings every 3s, disconnect after 10s of silence
+ *  - execute → log (streaming) → result (a single shape, ok true/false)
+ *  - cancel: fire-and-forget from the server
+ *  - MVP: ONE plugin connection per server instance at a time; a 2nd connection gets BUSY.
+ *    Run several servers with `figma-mcp <id>` → plugin port 10060 + id.
  */
 
 const PROTOCOL_VERSION = 1;
@@ -17,10 +18,11 @@ const HEARTBEAT_TIMEOUT_MS = 10_000;
 const WATCHDOG_GRACE_MS = 2_000; // server-side watchdog = timeoutMs + grace
 
 export class FigmaBridge {
-  constructor({ port = 3055 } = {}) {
+  constructor({ port = 10060, id = 0 } = {}) {
     this.port = port;
+    this.id = id;
     this.wss = null;
-    this.client = null; // WebSocket đang active
+    this.client = null; // active WebSocket
     this.hello = null; // plugin metadata
     this.pending = new Map(); // execId -> { resolve, reject, timer, logs }
     this.lastPongAt = 0;
@@ -33,7 +35,7 @@ export class FigmaBridge {
       this.wss = new WebSocketServer({ port: this.port });
       this.wss.on("error", (err) => {
         if (err.code === "EADDRINUSE") {
-          reject(new Error(`Port ${this.port} already in use — tắt instance khác hoặc đổi FIGMA_MCP_PORT`));
+          reject(new Error(`Port ${this.port} already in use — stop the other instance, or use another id / FIGMA_MCP_PLUGIN_PORT`));
         } else {
           reject(err);
         }
@@ -56,11 +58,12 @@ export class FigmaBridge {
       plugin: this.hello,
       pendingExecutions: [...this.pending.keys()],
       port: this.port,
+      id: this.id,
     };
   }
 
   /**
-   * Gửi code sang plugin, chờ result (1 shape: { ok, value } | { ok:false, code, error, logs }).
+   * Send code to the plugin and wait for the result (single shape: { ok, value } | { ok:false, code, error, logs }).
    */
   execute(code, limits = {}) {
     if (!this.connected) {
@@ -84,8 +87,8 @@ export class FigmaBridge {
     };
 
     return new Promise((resolve) => {
-      // Server-side watchdog: cắt trong trường hợp plugin treo / mất kết nối giữa chừng.
-      // (Timeout THẬT do plugin enforce bằng loop instrumentation — watchdog chỉ là lưới an toàn.)
+      // Server-side watchdog: cuts off runs when the plugin hangs / disconnects mid-flight.
+      // (The REAL timeout is enforced by the plugin via loop instrumentation — the watchdog is only a safety net.)
       const timer = setTimeout(() => {
         const entry = this.pending.get(id);
         if (!entry) return;
@@ -122,7 +125,7 @@ export class FigmaBridge {
 
   _onConnection(ws) {
     if (this.connected) {
-      // MVP: một kết nối tại một thời điểm
+      // MVP: one connection at a time per server instance
       ws.send(JSON.stringify({ type: "hello", role: "server", protocolVersion: PROTOCOL_VERSION, ok: false, code: "BUSY" }));
       setTimeout(() => ws.close(4000, "busy"), 200);
       return;
@@ -148,7 +151,7 @@ export class FigmaBridge {
     try {
       msg = JSON.parse(raw.toString());
     } catch {
-      return; // message rác — bỏ qua
+      return; // malformed message — ignore
     }
     if (ws !== this.client) return;
     this.lastPongAt = Date.now();
@@ -180,7 +183,7 @@ export class FigmaBridge {
       }
       case "result": {
         const entry = this.pending.get(msg.id);
-        if (!entry) return; // đã resolve bởi watchdog — ignore
+        if (!entry) return; // already resolved by the watchdog — ignore
         this.pending.delete(msg.id);
         clearTimeout(entry.timer);
         const logs = (Array.isArray(msg.logs) && msg.logs.length ? msg.logs : entry.logs);
