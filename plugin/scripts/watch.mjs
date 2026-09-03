@@ -1,24 +1,13 @@
 /**
- * watch.mjs — esbuild watch + chạy harden sau mỗi lần rebuild.
- * (esbuild CLI --watch không có post-hook, dùng JS API + onEnd result.)
+ * watch.mjs — esbuild watch (code.ts → code.js) + chạy harden sau mỗi lần rebuild.
+ * Dùng JS API + plugin onEnd hook (CLI --watch không có post-hook).
  */
-import { spawn } from "node:child_process";
-import { watch as fsWatch } from "node:fs";
+import { context } from "esbuild";
 import { execSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-
-const esbuildArgs = [
-  "esbuild",
-  "src/main.js",
-  "--bundle",
-  "--format=iife",
-  "--target=es2017",
-  "--outfile=dist/main.js",
-  "--watch=quiet",
-];
 
 function harden() {
   try {
@@ -28,18 +17,27 @@ function harden() {
   }
 }
 
-const child = spawn(process.platform === "win32" ? "npx" : "npx", esbuildArgs, {
-  cwd: root,
-  stdio: ["ignore", "inherit", "inherit"],
-  shell: process.platform === "win32",
+const hardenPlugin = {
+  name: "harden",
+  setup(build) {
+    // chạy sau mỗi rebuild thành công (esbuild đã ghi xong code.js)
+    build.onEnd((result) => {
+      if (result.errors.length === 0) harden();
+    });
+  },
+};
+
+const ctx = await context({
+  entryPoints: [join(root, "code.ts")],
+  bundle: true,
+  format: "iife",
+  target: "es2017",
+  outfile: join(root, "code.js"),
+  sourcemap: true,
+  absWorkingDir: root,
+  logLevel: "warning",
+  plugins: [hardenPlugin],
 });
 
-// esbuild --watch in "CHANGE" khi rebuild → harden theo
-child.stdout?.on("data", () => {}); // placeholder (watch=quiet im lặng); fallback dưới đây mới chắc chắn
-let t = null;
-fsWatch(join(root, "src"), { recursive: true }, () => {
-  clearTimeout(t);
-  t = setTimeout(harden, 400); // đợi esbuild ghi xong dist/main.js
-});
-harden(); // lần build đầu
-console.log("[plugin] watching src/ → dist/main.js (+harden)");
+await ctx.watch();
+console.log("[plugin] watching code.ts + src/ → code.js (+harden)");

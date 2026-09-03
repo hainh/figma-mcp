@@ -44,13 +44,13 @@
       <div class="dot" id="dot"></div>
       <div id="status">Connecting to ws://localhost:3055…</div>
       <button id="reconnect" class="reject" title="Đóng kết nối hiện tại và thử lại ngay">↻ Reconnect</button>
-      <label class="toggle" title="Tắt = mỗi run phải bấm Run thủ công (human-in-the-loop)">
-        <input type="checkbox" id="autorun" /> Auto-run
+      <label class="toggle" title="Mặc định bật auto-run. Tắt = mỗi run phải bấm Run thủ công (human-in-the-loop). Trạng thái được lưu qua figma.clientStorage">
+        <input type="checkbox" id="autorun" checked /> Auto-run
       </label>
     </header>
     <main id="feed"></main>
     <footer>
-      MCP: <code>figma-mcp</code> · plugin giữ kết nối WebSocket tới MCP server; mọi code AI được AST-validate trước khi chạy.
+      Running
     </footer>
 
     <script>

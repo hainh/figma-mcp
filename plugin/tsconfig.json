@@ -2,10 +2,16 @@
   "compilerOptions": {
     "target": "es2020",
     "lib": ["es2020"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
     "strict": true,
-    "typeRoots": [
-      "./node_modules/@types",
-      "./node_modules/@figma"
-    ]
-  }
+    "noUnusedLocals": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["@figma/plugin-typings"]
+  },
+  "include": ["code.ts", "src/**/*.ts"]
 }

@@ -1,6 +1,7 @@
 const eslint = require('@eslint/js')
 const tseslint = require('typescript-eslint')
 const figmaPlugin = require('@figma/eslint-plugin-figma-plugins')
+const globals = require('globals')
 
 module.exports = tseslint.config(
   eslint.configs.recommended,
@@ -27,6 +28,13 @@ module.exports = tseslint.config(
     },
   },
   {
-    ignores: ['code.js', 'dist', 'eslint.config.js'],
+    // build/test tooling runs in Node, not the Figma sandbox
+    files: ['scripts/**/*.mjs', 'tests/**/*.mjs'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
+  {
+    ignores: ['code.js', 'eslint.config.js'],
   },
 )

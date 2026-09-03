@@ -1,5 +1,5 @@
 /**
- * harden.mjs — post-process plugin/dist/main.js để vượt qua static check
+ * harden.mjs — post-process plugin/code.js để vượt qua static check
  * của Figma sandbox: "SyntaxError: possible import expression rejected".
  *
  * Figma quét TEXT của bundle tìm pattern `import(` và `import.meta` (dynamic
@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const file = join(root, "dist", "main.js");
+const file = join(root, "code.js");
 
 let code = readFileSync(file, "utf8");
 const original = code;
@@ -47,6 +47,4 @@ for (const re of [/\bimport\(/g, /\bimport\.meta/g]) {
 }
 
 writeFileSync(file, code);
-console.log(
-  `[harden] ok — escaped ${original.length - code.length >= 0 ? "patterns" : ""} (size ${original.length} → ${code.length} bytes)`
-);
+console.log(`[harden] ok — escaped patterns (size ${original.length} → ${code.length} bytes)`);

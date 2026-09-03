@@ -15,14 +15,14 @@ AI Agent ──MCP(stdio)──► MCP Server ──ws://localhost:3055──►
 | Path | Vai trò |
 |---|---|
 | `server/` | MCP server (stdio) + WebSocket bridge (cổng 3055) |
-| `plugin/` | Figma plugin — `src/validator.js` (AST denylist + loop instrumentation), `src/executor.js` (guard, console capture, figma Proxy, font helpers), `ui.html` (WS + approval UX) |
+| `plugin/` | Figma plugin — `src/validator.ts` (AST denylist + loop instrumentation), `src/executor.ts` (guard, console capture, figma Proxy, font helpers), `ui.html` (WS + approval UX) |
 | `plugin/scripts/harden.mjs` | Post-build: escape `import(` / `import.meta` trong string literal của acorn — Figma sandbox quét text và reject bundle nếu thấy pattern động ("possible import expression rejected") |
 
 ## Cài đặt
 
 ```bash
 npm install                 # workspaces: server + plugin
-npm run build:plugin        # esbuild → plugin/dist/main.js
+npm run build:plugin        # esbuild → plugin/code.js (+ harden)
 ```
 
 ### 1. Chạy MCP server

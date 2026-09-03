@@ -3,6 +3,7 @@
   "id": "1677287843314876325",
   "api": "1.0.0",
   "main": "code.js",
+  "ui": "ui.html",
   "capabilities": [],
   "enableProposedApi": false,
   "documentAccess": "dynamic-page",
@@ -13,8 +14,9 @@
     "buzz"
   ],
   "networkAccess": {
+    "reasoning": "My localhost use only",
     "allowedDomains": [
-      "none"
+      "*"
     ]
   }
 }

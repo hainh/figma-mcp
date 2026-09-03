@@ -4,25 +4,82 @@
  * Nhận message từ UI (WS bridge + approval), validate + execute code AI, trả result về UI.
  * Protocol: xem architecture.md § Quy tắc protocol.
  */
-import { runCode, createControlToken, safeStringify } from "./executor.js";
-import { validateAndInstrument } from "./validator.js";
+import { runCode, createControlToken, safeStringify, type ControlToken, type Limits } from "./executor.ts";
+import { validateAndInstrument, ValidationError } from "./validator.ts";
 
 const PROTOCOL_VERSION = 1;
 const PLUGIN_NAME = "Figma MCP Connector";
 const PLUGIN_VERSION = "0.1.0";
 
+// ==================== protocol types ====================
+
+/** Message UI → main (WebSocket bridge events + approval). */
+type UiToMainMessage =
+  | { kind: "ws-connected" }
+  | { kind: "ui-ready" }
+  | { kind: "ws-reconnected" }
+  | { kind: "ws-closed" }
+  | { kind: "ws-message"; data: string }
+  | { kind: "approval"; id: string; approved: boolean }
+  | { kind: "set-autorun"; value: unknown };
+
+/** Message server → plugin (qua UI websocket). */
+type ServerMessage =
+  | { type: "hello"; role?: string; ok?: boolean; code?: string; protocolVersion?: number }
+  | { type: "execute"; id: string; code: string; limits?: Partial<Limits> }
+  | { type: "cancel"; id: string }
+  | { type: "pong" };
+
+/** Payload plugin → UI. */
+type UiPayload = Record<string, unknown>;
+
+/** Result payload plugin → server (qua UI "to-ws"). */
+interface ResultPayload {
+  type: "result" | "log";
+  id: string;
+  ok?: boolean;
+  value?: unknown;
+  createdNodes?: unknown[];
+  code?: string;
+  error?: string;
+  level?: string;
+  args?: string[];
+  stats?: unknown;
+  logs: unknown[];
+}
+
+type RunState = "pending" | "awaiting-approval" | "running";
+
+interface InFlightRun {
+  id: string;
+  code: string;
+  limits: Limits;
+  control: ControlToken;
+  state: RunState;
+}
+
 figma.showUI(__html__, { width: 380, height: 520 });
 
-/** Auto-run OFF mặc định — human-in-the-loop (architecture.md § Approval UX) */
-let autoRun = false;
+/** Auto-run ON mặc định — user có thể tắt để bật human-in-the-loop; state lưu qua clientStorage. */
+const AUTORUN_KEY = "autorun";
+let autoRun = true;
 
-/** execId → { control, promise? } — các run đang chờ approval hoặc đang chạy */
-const inFlight = new Map();
+//Khôi phục trạng thái auto-run đã lưu (figma.clientStorage persist qua phiên)
+figma.clientStorage
+  .getAsync(AUTORUN_KEY)
+  .then((v) => {
+    if (typeof v === "boolean" && v !== autoRun) {
+      autoRun = v;
+      notifyUi({ kind: "autorun-changed", value: autoRun });
+    }
+  })
+  .catch(() => {});
 
-let helloSent = false;
+/** execId → run đang chờ approval hoặc đang chạy */
+const inFlight = new Map<string, InFlightRun>();
 
 // ================= UI → MAIN =================
-figma.ui.onmessage = async (msg) => {
+figma.ui.onmessage = async (msg: UiToMainMessage) => {
   if (!msg || typeof msg !== "object") return;
 
   switch (msg.kind) {
@@ -36,18 +93,17 @@ figma.ui.onmessage = async (msg) => {
     }
 
     case "ws-closed": {
-      helloSent = false;
       return;
     }
 
     case "ws-message": {
-      let data;
+      let data: unknown;
       try {
         data = JSON.parse(msg.data);
       } catch {
         return;
       }
-      handleServerMessage(data);
+      handleServerMessage(data as ServerMessage);
       return;
     }
 
@@ -77,21 +133,24 @@ figma.ui.onmessage = async (msg) => {
     case "set-autorun": {
       autoRun = Boolean(msg.value);
       notifyUi({ kind: "autorun-changed", value: autoRun });
+      figma.clientStorage.setAsync(AUTORUN_KEY, autoRun).catch(() => {});
       return;
     }
   }
 };
 
 // ================= SERVER → PLUGIN (qua UI) =================
-function handleServerMessage(msg) {
+function handleServerMessage(msg: ServerMessage): void {
   switch (msg.type) {
     case "hello": {
       if (msg.role === "server") {
         if (msg.ok === false && msg.code === "BUSY") {
-          notifyUi({ kind: "connection", status: "busy", message: "Another plugin instance already holds the connection." });
-          helloSent = false;
+          notifyUi({
+            kind: "connection",
+            status: "busy",
+            message: "Another plugin instance already holds the connection.",
+          });
         } else if (msg.ok === true) {
-          helloSent = true;
           notifyUi({ kind: "connection", status: "connected", server: `protocol v${msg.protocolVersion}` });
         }
       }
@@ -108,7 +167,14 @@ function handleServerMessage(msg) {
       if (run) {
         if (run.state === "awaiting-approval") {
           inFlight.delete(msg.id);
-          sendResult({ type: "result", id: msg.id, ok: false, code: "CANCELLED", error: "Cancelled before approval.", logs: [] });
+          sendResult({
+            type: "result",
+            id: msg.id,
+            ok: false,
+            code: "CANCELLED",
+            error: "Cancelled before approval.",
+            logs: [],
+          });
         } else {
           run.control.cancelled = true;
         }
@@ -121,13 +187,13 @@ function handleServerMessage(msg) {
   }
 }
 
-function onExecuteRequest(msg) {
+function onExecuteRequest(msg: Extract<ServerMessage, { type: "execute" }>): void {
   const { id, code, limits } = msg;
   if (!id || typeof code !== "string") return;
   if (inFlight.has(id)) return; // duplicate id
 
   const control = createControlToken();
-  const run = {
+  const run: InFlightRun = {
     id,
     code,
     limits: normalizeLimits(limits),
@@ -137,15 +203,21 @@ function onExecuteRequest(msg) {
   inFlight.set(id, run);
 
   // Pre-validate nhanh để hiện lỗi sớm trong UI + tiết kiệm round-trip approval cho code rác
-  let preValid = true;
   try {
     validateAndInstrument(code);
   } catch (e) {
-    preValid = false;
     inFlight.delete(id);
-    sendResult({ type: "result", id, ok: false, code: e.code || "POLICY", error: String(e.message || e), logs: [] });
+    const err = e as ValidationError;
+    sendResult({
+      type: "result",
+      id,
+      ok: false,
+      code: err.code || "POLICY",
+      error: String(err.message || e),
+      logs: [],
+    });
+    return;
   }
-  if (!preValid) return;
 
   if (autoRun) {
     run.state = "running";
@@ -156,12 +228,12 @@ function onExecuteRequest(msg) {
   }
 }
 
-async function startExecution(run) {
+async function startExecution(run: InFlightRun): Promise<void> {
   const { id, code, limits, control } = run;
   try {
     const result = await runCode(code, limits, {
       control,
-      onLog: (entry) => sendResult({ type: "log", id, level: entry.level, args: entry.args }),
+      onLog: (entry) => sendResult({ type: "log", id, level: entry.level, args: entry.args, logs: [] }),
     });
     inFlight.delete(id);
     sendResult({
@@ -179,12 +251,13 @@ async function startExecution(run) {
   } catch (e) {
     inFlight.delete(id);
     sendResult({ type: "result", id, ok: false, code: "RUNTIME", error: safeStringify(e), logs: [] });
-    notifyUi({ kind: "run-finished", id, ok: false, summary: String(e && e.message) });
+    const err = e as { message?: string };
+    notifyUi({ kind: "run-finished", id, ok: false, summary: String(err?.message ?? e) });
   }
 }
 
 // ================= helpers =================
-function buildHello() {
+function buildHello(): UiPayload {
   return {
     type: "hello",
     pluginName: PLUGIN_NAME,
@@ -196,8 +269,8 @@ function buildHello() {
   };
 }
 
-function normalizeLimits(limits = {}) {
-  const num = (v, dflt, min, max) => {
+function normalizeLimits(limits: Partial<Limits> = {}): Limits {
+  const num = (v: unknown, dflt: number, min: number, max: number): number => {
     const n = Number(v);
     return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : dflt;
   };
@@ -208,18 +281,19 @@ function normalizeLimits(limits = {}) {
   };
 }
 
-function sendToWs(payload) {
+function sendToWs(payload: unknown): void {
   notifyUi({ kind: "to-ws", payload: JSON.stringify(payload) });
 }
 
-function sendResult(payload) {
+function sendResult(payload: ResultPayload): void {
   sendToWs(payload);
 }
 
-function notifyUi(payload) {
+function notifyUi(payload: UiPayload): void {
   try {
     figma.ui.postMessage(payload);
   } catch {
     /* UI có thể đã đóng */
   }
 }
+

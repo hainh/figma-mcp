@@ -1,40 +1,67 @@
-Below are the steps to get your plugin running. You can also find instructions at:
+# Figma MCP Connector — Plugin
 
-  https://www.figma.com/plugin-docs/plugin-quickstart-guide/
+Figma plugin runtime cho MCP: thực thi code JavaScript do AI sinh ra, chạy trong
+sandbox có kiểm duyệt AST (`figma.*`).
 
-This plugin template uses Typescript and NPM, two standard tools in creating JavaScript applications.
+## Kiến trúc build
 
-First, download Node.js which comes with NPM. This will allow you to install TypeScript and other
-libraries. You can find the download link here:
+```
+code.ts (entry) ─┐
+src/main.ts     ─┤→ esbuild --bundle (IIFE) → code.js → scripts/harden.mjs → Figma
+src/executor.ts ─┤        (npm run build)          (escape pattern import( / import.meta
+src/validator.ts ┘                                    để vượt static check của sandbox)
+```
 
-  https://nodejs.org/en/download/
+- `src/validator.ts` — security boundary: AST denylist + instrument mọi loop với
+  `await __guard.tick()` (timeout / cancel / command budget).
+- `src/executor.ts` — sandbox runtime: Proxy bọc `figma.*`, console capture, helpers.
+- `src/main.ts` — message router giữa UI (websocket bridge) và executor, approval flow.
+- `ui.html` — UI phía browser: WS client tới MCP server + UX approve/reject.
+- `code.js` — file build artifact (đã gitignore). `manifest.json` trỏ `main: "code.js"`.
 
-Next, install TypeScript using the command:
+## Scripts
 
-  npm install -g typescript
+```bash
+npm run build      # esbuild bundle code.ts → code.js (+ code.js.map) + harden
+npm run watch      # esbuild watch + harden tự động sau mỗi rebuild
+npm run typecheck  # tsc --noEmit (kiểm tra type, không phát sinh file)
+npm run lint       # eslint (typescript-eslint + @figma/eslint-plugin-figma-plugins)
+npm test           # smoke tests validator + executor (Node native TS type-stripping, cần Node >= 22.18)
+npm run map-stack  # map stack trace "code.js:line:col" từ Figma console về src/*.ts
+```
 
-Finally, in the directory of your plugin, get the latest type definitions for the plugin API by running:
+## Debugging trên Figma (source maps)
 
-  npm install --save-dev @figma/plugin-typings
+- Bundle **không minify** (esbuild mặc định) → `code.js` vẫn đọc được, mỗi hàm có
+  comment `// src/xxx.ts` phía trên, tên hàm trong stack giữ nguyên.
+- Build sinh `code.js.map` (external, gitignore — Figma không upload file này khi
+  publish, sandbox QuickJS cũng không tự decode map).
+- Khi error trên main thread in stack dạng `at fn (code.js:6168:3)`, map về TS:
+  ```bash
+  node scripts/map-stack.mjs "at onExecuteRequest (code.js:6168:3)"
+  # → src/main.ts:61:1
+  ```
+  hoặc `pbpaste | node scripts/map-stack.mjs`.
+- Lưu ý: `harden.mjs` chạy SAU khi sinh map, escape `import(` → `import\u0028`
+  chỉ trong string literal nội bộ acorn → column trên vài dòng đó lệch +5 ký tự;
+  code trong `src/*.ts` không bị ảnh hưởng.
+- UI (`ui.html`) chạy trong iframe → debug bình thường bằng Chrome DevTools
+  (chuột phải → Inspect).
 
-If you are familiar with JavaScript, TypeScript will look very familiar. In fact, valid JavaScript code
-is already valid Typescript code.
+## Nạp plugin vào Figma
 
-TypeScript adds type annotations to variables. This allows code editors such as Visual Studio Code
-to provide information about the Figma API while you are writing code, as well as help catch bugs
-you previously didn't notice.
+1. `npm run build` (hoặc `npm run watch` trong lúc dev).
+2. Figma → Plugins → Development → Import plugin from manifest → chọn `plugin/manifest.json`.
+3. Chạy MCP server (`npm run start:server` ở thư mục cha) rồi mở plugin, kết nối WS tới
+   `ws://localhost:3055` (đổi cổng qua `FIGMA_MCP_PORT`) từ UI panel.
 
-For more information, visit https://www.typescriptlang.org/
+## Ghi chú
 
-Using TypeScript requires a compiler to convert TypeScript (code.ts) into JavaScript (code.js)
-for the browser to run.
-
-We recommend writing TypeScript code using Visual Studio code:
-
-1. Download Visual Studio Code if you haven't already: https://code.visualstudio.com/.
-2. Open this directory in Visual Studio Code.
-3. Compile TypeScript to JavaScript: Run the "Terminal > Run Build Task..." menu item,
-    then select "npm: watch". You will have to do this again every time
-    you reopen Visual Studio Code.
-
-That's it! Visual Studio Code will regenerate the JavaScript file every time you save.
+- Thêm file mới trong `src/` → import bằng phần mở rộng `.ts` (ví dụ
+  `import { x } from "./foo.ts"`). esbuild resolve trực tiếp; Node tests cũng vậy.
+- KHÔNG được dùng dynamic `import()` / `import.meta` trong source — Figma sandbox
+  từ chối; `harden.mjs` sẽ fail build nếu phát hiện pattern sống.
+- `ui.html` được khai báo trong `manifest.json` (`"ui": "ui.html"`); main thread gọi
+  `figma.showUI(__html__)`.
+- `manifest.json → networkAccess.allowedDomains` liệt kê `ws://localhost:3055` /
+  `ws://127.0.0.1:3055`. Nếu đổi cổng server qua `FIGMA_MCP_PORT` → cập nhật manifest theo.

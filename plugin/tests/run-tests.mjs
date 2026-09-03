@@ -2,8 +2,8 @@
  * Smoke tests cho validator + executor, chạy bằng Node với mock figma global.
  *   node plugin/tests/run-tests.mjs
  */
-import { validateAndInstrument, ValidationError } from "../src/validator.js";
-import { runCode, createControlToken } from "../src/executor.js";
+import { validateAndInstrument, ValidationError } from "../src/validator.ts";
+import { runCode, createControlToken } from "../src/executor.ts";
 
 // ---------- mock figma API (đủ cho các test dưới) ----------
 let nodeSeq = 100;
