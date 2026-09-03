@@ -1,8 +1,44 @@
 #!/usr/bin/env node
+import { createRequire } from "node:module";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { FigmaBridge } from "./bridge.js";
+
+const require = createRequire(import.meta.url);
+const PKG_VERSION = (() => {
+  try {
+    return require("../package.json").version;
+  } catch {
+    return "0.0.0";
+  }
+})();
+
+// ---------- CLI: --help / --version ----------
+const argv = process.argv.slice(2);
+if (argv.includes("--version") || argv.includes("-v")) {
+  console.log(PKG_VERSION);
+  process.exit(0);
+}
+if (argv.includes("--help") || argv.includes("-h")) {
+  console.log(`figma-mcp — MCP server bridging AI agents to the Figma plugin runtime.
+
+Usage: figma-mcp
+
+Runs an MCP server on stdio and a WebSocket bridge for the Figma plugin.
+
+Environment:
+  FIGMA_MCP_PORT   WebSocket port the Figma plugin connects to (default: 3055)
+
+Options:
+  -v, --version    Print version and exit
+  -h, --help       Print this help and exit
+
+MCP client config:
+  { "mcpServers": { "figma-mcp": { "command": "figma-mcp" } } }
+`);
+  process.exit(0);
+}
 
 const PORT = Number(process.env.FIGMA_MCP_PORT || 3055);
 const bridge = new FigmaBridge({ port: PORT });
@@ -65,7 +101,7 @@ ${EXECUTE_SYSTEM_PROMPT}`,
 ];
 
 const server = new Server(
-  { name: "figma-mcp", version: "0.1.0" },
+  { name: "figma-mcp", version: PKG_VERSION },
   { capabilities: { tools: {} } }
 );
 
@@ -140,6 +176,11 @@ function jsonResult(obj) {
   return { content: [{ type: "text", text: JSON.stringify(obj, null, 2) }] };
 }
 
-await bridge.start();
+try {
+  await bridge.start();
+} catch (err) {
+  console.error(`[figma-mcp] failed to start: ${err?.message || err}`);
+  process.exit(1);
+}
 await server.connect(new StdioServerTransport());
-console.error("[figma-mcp] MCP server ready on stdio (tools: figma_status, execute_code, get_document_info, get_selection, cancel_execution)");
+console.error(`[figma-mcp] v${PKG_VERSION} ready — MCP on stdio, plugin bridge on ws://localhost:${PORT}`);

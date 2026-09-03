@@ -1,5 +1,5 @@
 {
-  "name": "figma-mcp",
+  "name": "figma-mcp-monorepo",
   "version": "0.1.0",
   "private": true,
   "description": "MCP server + Figma plugin: AI agents write JavaScript that runs against figma.* in a sandboxed plugin runtime",
@@ -10,7 +10,9 @@
   "scripts": {
     "build:plugin": "npm run build --workspace plugin",
     "start:server": "npm start --workspace server",
-    "dev": "npm run build:plugin && npm start --workspace server"
+    "dev": "npm run build:plugin && npm start --workspace server",
+    "link": "npm link --workspace server",
+    "install:global": "npm install -g ./server"
   },
   "engines": {
     "node": ">=18"

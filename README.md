@@ -25,11 +25,23 @@ npm install                 # workspaces: server + plugin
 npm run build:plugin        # esbuild → plugin/code.js (+ harden)
 ```
 
+### Cài MCP server thành CLI toàn cục (khuyến nghị)
+
+```bash
+npm run install:global      # = npm install -g ./server
+# hoặc dev mode, tự cập nhật khi sửa code:
+npm run link                # = npm link --workspace server
+
+figma-mcp --version         # kiểm tra lệnh đã có trên PATH
+```
+
 ### 1. Chạy MCP server
 
 ```bash
+figma-mcp
+# hoặc FIGMA_MCP_PORT=3056 figma-mcp
+# hoặc chạy trực tiếp từ repo (không cần cài đặt):
 npm run start:server
-# hoặc FIGMA_MCP_PORT=3056 node server/src/index.js
 ```
 
 Server lắng nghe:
@@ -46,16 +58,20 @@ Server lắng nghe:
 
 ### 3. Cấu hình MCP client (Claude Desktop / các MCP client khác)
 
+Sau khi cài global, chỉ cần khai báo lệnh `figma-mcp` — không cần đường dẫn tuyệt đối:
+
 ```json
 {
   "mcpServers": {
     "figma-mcp": {
-      "command": "node",
-      "args": ["C:/MyData/CreatorHub/figma-mcp/server/src/index.js"]
+      "command": "figma-mcp"
     }
   }
 }
 ```
+
+> Windows: nếu client không tìm thấy lệnh bare, dùng `"command": "cmd", "args": ["/c", "figma-mcp"]`.
+> Chưa cài global? trỏ thẳng vào file: `"command": "node", "args": ["C:/MyData/CreatorHub/figma-mcp/server/src/index.js"]`.
 
 ## Sử dụng
 

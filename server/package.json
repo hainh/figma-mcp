@@ -1,12 +1,32 @@
 {
-  "name": "@figma-mcp/server",
+  "name": "figma-mcp",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "description": "MCP server bridging AI agents to the Figma plugin runtime over localhost WebSocket",
+  "description": "MCP server bridging AI agents to the Figma plugin runtime over localhost WebSocket. Installs a `figma-mcp` CLI command.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "figma",
+    "figma-plugin",
+    "ai-agent",
+    "design-automation"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/creatorhub/figma-mcp.git",
+    "directory": "server"
+  },
   "main": "src/index.js",
   "bin": {
-    "figma-mcp-server": "src/index.js"
+    "figma-mcp": "src/index.js"
+  },
+  "files": [
+    "src/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
   },
   "scripts": {
     "start": "node src/index.js"
@@ -15,7 +35,7 @@
     "@modelcontextprotocol/sdk": "^1.12.0",
     "ws": "^8.18.0"
   },
-  "engines": {
-    "node": ">=18"
+  "publishConfig": {
+    "access": "public"
   }
 }
