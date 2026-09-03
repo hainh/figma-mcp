@@ -2,3 +2,7 @@ node_modules/
 dist/
 *.log
 .DS_Store
+
+# figma docs crawl intermediates
+scripts/cache/
+scripts/pages.json
