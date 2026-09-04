@@ -146,3 +146,7 @@ Mặc định **Auto-run OFF**: mỗi lệnh `execute` hiện code + nút **Run/
 node plugin/tests/run-tests.mjs        # 27 unit tests: denylist, loop instrumentation, timeout/cancel/budget
 node scripts/integration-test.mjs      # 10 integration tests: spawn `figma-mcp <id>` + mock plugin WS + remote MCP client (HTTP)
 ```
+
+## License
+
+[MIT](LICENSE)

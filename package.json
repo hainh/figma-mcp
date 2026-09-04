@@ -19,6 +19,7 @@
     "link": "npm link --workspace server",
     "install:global": "npm install -g ./server"
   },
+  "license": "MIT",
   "engines": {
     "node": ">=18"
   }

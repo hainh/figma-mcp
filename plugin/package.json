@@ -13,7 +13,7 @@
     "watch": "node scripts/watch.mjs"
   },
   "author": "",
-  "license": "",
+  "license": "MIT",
   "dependencies": {
     "acorn": "^8.15.0"
   },
