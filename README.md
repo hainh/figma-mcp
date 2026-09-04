@@ -1,6 +1,6 @@
 # Figma MCP — "Claude Code for Figma"
 
-MCP server + Figma plugin: AI agent viết **JavaScript**, code được **AST-validate** rồi chạy trong **sandbox có timeout/budget** ngay trên plugin main thread với `figma.*`.
+MCP server + Figma plugin: the AI agent writes **JavaScript**, the code is **AST-validated** and then run in a **sandbox with timeout/budget** directly on the plugin main thread with `figma.*`.
 
 ```text
 AI Agent ──MCP (Streamable HTTP :10030+id)──► MCP Server ──ws://localhost:10060+id──► Plugin UI (bridge + approval)
@@ -10,71 +10,71 @@ AI Agent ──MCP (Streamable HTTP :10030+id)──► MCP Server ──ws://lo
                                                         AST validator → sandbox executor → figma.*
 ```
 
-## Cấu trúc
+## Structure
 
-| Path | Vai trò |
+| Path | Role |
 |---|---|
-| `server/` | MCP server (remote: Streamable HTTP cổng 10030+id, kèm `--stdio` opt-in) + WebSocket bridge cho plugin (cổng 10060+id) |
+| `server/` | MCP server (remote: Streamable HTTP on port 10030+id, plus opt-in `--stdio`) + WebSocket bridge for the plugin (port 10060+id) |
 | `plugin/` | Figma plugin — `src/validator.ts` (AST denylist + loop instrumentation), `src/executor.ts` (guard, console capture, figma Proxy, font helpers), `ui.html` (WS + approval UX) |
-| `plugin/scripts/harden.mjs` | Post-build: escape `import(` / `import.meta` trong string literal của acorn — Figma sandbox quét text và reject bundle nếu thấy pattern động ("possible import expression rejected") |
+| `plugin/scripts/harden.mjs` | Post-build: escapes `import(` / `import.meta` inside acorn string literals — the Figma sandbox scans text and rejects the bundle if it finds dynamic patterns ("possible import expression rejected") |
 
-## Cài đặt
+## Installation
 
 ```bash
 npm install                 # workspaces: server + plugin
 npm run build:plugin        # esbuild → plugin/code.js (+ harden)
 ```
 
-### Cài MCP server thành CLI toàn cục (khuyến nghị)
+### Install the MCP server as a global CLI (recommended)
 
 ```bash
 npm run install:global      # = npm install -g ./server
-# hoặc dev mode, tự cập nhật khi sửa code:
+# or dev mode, auto-updates when you edit the code:
 npm run link                # = npm link --workspace server
 
-figma-mcp --version         # kiểm tra lệnh đã có trên PATH
+figma-mcp --version         # verify the command is on your PATH
 ```
 
-### 1. Chạy MCP server
+### 1. Run the MCP server
 
 ```bash
 figma-mcp            # id 0 → MCP 10030, plugin 10060
 figma-mcp 1          # id 1 → MCP 10031, plugin 10061
 figma-mcp 2          # id 2 → MCP 10032, plugin 10062
-npm run start:server # chạy trực tiếp từ repo (id 0)
+npm run start:server # run directly from the repo (id 0)
 ```
 
-Tham số dòng lệnh là **id (number, mặc định 0)** — cả hai cổng đều cộng thêm id, nên chạy **nhiều server song song** được (mỗi server một plugin Figma).
+The command-line argument is an **id (number, default 0)** — both ports are offset by the id, so you can run **multiple servers in parallel** (one server per Figma plugin).
 
-| Cờ / Env | Ý nghĩa |
+| Flag / Env | Meaning |
 |---|---|
-| `[id]` | Bù cổng: MCP = 10030+id, plugin = 10060+id |
-| `--mcp-port <n>` | Ghi đè cổng MCP client (env `FIGMA_MCP_HTTP_PORT`) |
-| `--plugin-port <n>` | Ghi đè cổng plugin bridge (env `FIGMA_MCP_PLUGIN_PORT`, hoặc `FIGMA_MCP_PORT` cũ) |
-| `--host <addr>` | Bind address cho HTTP (mặc định `0.0.0.0` — mở cho client remote khác máy; dùng `127.0.0.1` nếu chỉ cần localhost) |
-| `--path <p>` | Endpoint MCP HTTP (mặc định `/mcp`) |
-| `--stdio` | Mở thêm MCP qua stdio (client local kiểu Claude Desktop cũ) |
+| `[id]` | Port offset: MCP = 10030+id, plugin = 10060+id |
+| `--mcp-port <n>` | Override the MCP client port (env `FIGMA_MCP_HTTP_PORT`) |
+| `--plugin-port <n>` | Override the plugin bridge port (env `FIGMA_MCP_PLUGIN_PORT`, or legacy `FIGMA_MCP_PORT`) |
+| `--host <addr>` | HTTP bind address (default `0.0.0.0` — open to remote clients on other machines; use `127.0.0.1` if localhost is enough) |
+| `--path <p>` | MCP HTTP endpoint (default `/mcp`) |
+| `--stdio` | Additionally expose MCP over stdio (legacy local clients such as Claude Desktop) |
 
-Server lắng nghe:
-- **http://<host>:10030+id/mcp** — MCP Streamable HTTP cho client remote (+ `GET /health` xem trạng thái bridge)
-- **ws://localhost:10060+id** — cho Figma plugin kết nối vào
+The server listens on:
+- **http://<host>:10030+id/mcp** — MCP Streamable HTTP for remote clients (+ `GET /health` to check bridge status)
+- **ws://localhost:10060+id** — for the Figma plugin to connect to
 
-> ⚠️ **Lưu ý khi chạy remote**: MCP client ở máy nào cũng connect được (server bind `0.0.0.0`), nhưng
-> Figma plugin vẫn chỉ nối `ws://localhost:…` → plugin **phải chạy trên cùng máy với server**.
-> Trường hợp Figma ở máy khác: chạy server ngay máy có Figma, rồi mở tunnel từ máy client
-> (`ssh -L 10030:localhost:10030 user@may-figma`) và trỏ `url` về `http://localhost:10030/mcp`.
+> ⚠️ **Note when running remotely**: an MCP client on any machine can connect (the server binds `0.0.0.0`), but
+> the Figma plugin still only connects to `ws://localhost:…` → the plugin **must run on the same machine as the server**.
+> If Figma is on another machine: run the server on the machine that has Figma, then open a tunnel from the client machine
+> (`ssh -L 10030:localhost:10030 user@figma-machine`) and point `url` at `http://localhost:10030/mcp`.
 
-### 2. Đăng ký plugin trong Figma (một lần)
+### 2. Register the plugin in Figma (one time)
 
-1. Mở Figma (web hoặc desktop app) → tạo file bất kỳ.
+1. Open Figma (web or desktop app) → create any file.
 2. `Plugins → Development → Import plugin from manifest…`
-3. Chọn file `figma-mcp/plugin/manifest.json`.
-4. Chạy plugin: `Plugins → Development → Figma MCP Connector`.
-5. UI plugin báo chấm xanh **"Connected"** khi bắt được MCP server.
+3. Select the file `figma-mcp/plugin/manifest.json`.
+4. Run the plugin: `Plugins → Development → Figma MCP Connector`.
+5. The plugin UI shows a green dot **"Connected"** once it reaches the MCP server.
 
-### 3. Cấu hình MCP client (remote — Claude Desktop / Cline / Cursor / các MCP client khác)
+### 3. Configure the MCP client (remote — Claude Desktop / Cline / Cursor / other MCP clients)
 
-Vì server chạy remote (HTTP), client chỉ cần khai báo `url` — không cần `command`:
+Because the server runs remotely (HTTP), the client only needs a `url` — no `command` required:
 
 ```json
 {
@@ -86,59 +86,59 @@ Vì server chạy remote (HTTP), client chỉ cần khai báo `url` — không c
 }
 ```
 
-> Kết nối sang máy khác: thay `localhost` bằng IP/host của máy chạy server (server bind `0.0.0.0` sẵn).
-> Client chỉ hỗ trợ stdio? thêm `--stdio` vào lệnh chạy server, ví dụ `"command": "figma-mcp", "args": ["--stdio"]`.
+> Connecting to another machine: replace `localhost` with the IP/host of the machine running the server (the server already binds `0.0.0.0`).
+> Client that only supports stdio? add `--stdio` to the server command, e.g. `"command": "figma-mcp", "args": ["--stdio"]`.
 
-## Sử dụng
+## Usage
 
-Tools expose cho agent:
+Tools exposed to the agent:
 
-| Tool | Mô tả |
+| Tool | Description |
 |---|---|
-| `figma_status` | Plugin đã connect chưa, đang mở file nào |
-| `execute_code` | Chạy JavaScript trên `figma.*` (kèm limits) |
-| `get_document_info` | Đọc nhanh pages/currentPage/topLevels |
-| `get_selection` | Nodes đang selected |
-| `cancel_execution` | Hủy run đang chờ approval / đang chạy |
+| `figma_status` | Whether the plugin is connected and which file is open |
+| `execute_code` | Run JavaScript against `figma.*` (with limits) |
+| `get_document_info` | Quick read of pages/currentPage/topLevels |
+| `get_selection` | Currently selected nodes |
+| `cancel_execution` | Cancel a run that is awaiting approval / currently executing |
 
-Ví dụ prompt cho agent: *"Create 3 product cards on the current page using execute_code"*.
+Example prompt for the agent: *"Create 3 product cards on the current page using execute_code"*.
 
-Flow tự sửa lỗi (điểm ăn tiền của hệ thống):
+Self-fixing flow (the killer feature of the system):
 
 ```text
-Generate → Execute → Error/POLICY/logs → Agent đọc logs + createdNodes → Fix → Execute lại → ✔
+Generate → Execute → Error/POLICY/logs → Agent reads logs + createdNodes → Fix → Execute again → ✔
 ```
 
-### Rules khi agent viết code (đã ghi trong tool description)
+### Rules when the agent writes code (already embedded in the tool description)
 
-- Có sẵn: `figma` (proxied), `console` (stream về agent), `helpers`.
-- **Dùng `await helpers.createText("Hello", { fontSize: 24 })`** — không set `.characters` trực tiếp (Figma bắt buộc load font trước).
-- Được dùng top-level `await` / `return {...}`.
-- Bị chặn (lỗi `POLICY`): `fetch`, `eval`, `Function`, `import()`, `.constructor`/`.prototype`/`__proto__`, `obj[expr]` động, `figma.ui`/`showUI`/`settings`.
-- Mọi loop được instrument `await __guard.tick()` → timeout, cancel, budget guard.
+- Available: `figma` (proxied), `console` (streamed back to the agent), `helpers`.
+- **Use `await helpers.createText("Hello", { fontSize: 24 })`** — do not set `.characters` directly (Figma requires loading the font first).
+- Top-level `await` / `return {...}` are allowed.
+- Blocked (`POLICY` error): `fetch`, `eval`, `Function`, `import()`, `.constructor`/`.prototype`/`__proto__`, dynamic `obj[expr]`, `figma.ui`/`showUI`/`settings`.
+- Every loop is instrumented with `await __guard.tick()` → timeout, cancel, and budget guards.
 
 ### Approval UX
 
-Mặc định **Auto-run OFF**: mỗi lệnh `execute` hiện code + nút **Run/Reject** trong plugin UI. Bật Auto-run khi đã tin cậy workflow.
+By default **Auto-run is OFF**: each `execute` command shows the code plus **Run/Reject** buttons in the plugin UI. Enable Auto-run once you trust the workflow.
 
 ### Plugin UI
 
-- Chấm trạng thái: đỏ (ngắt) / xanh (đã nối MCP server).
-- Ô **MCP server port** + nút **Apply** (mặc định `10060`): đặt cổng bridge, lưu qua `figma.clientStorage` và reconnect ngay. Chạy `figma-mcp 1` → nhập `10061`.
-- Nút **↻ Reconnect**: đóng socket hiện tại (kể cả trạng thái nửa sống nửa chết) và bắt tay lại từ đầu — hữu ích khi restart MCP server mà plugin không tự nhận ra.
-- Toggle **Auto-run** (mặc định ON).
-- Feed hiển thị code chờ duyệt, log streaming, kết quả từng run.
-- Tự reconnect mỗi 2.5s + heartbeat `ping` 3s; fallback `ws://localhost` → `ws://127.0.0.1`.
+- Status dot: red (disconnected) / green (connected to the MCP server).
+- **MCP server port** field + **Apply** button (default `10060`): sets the bridge port, persists it via `figma.clientStorage`, and reconnects immediately. Running `figma-mcp 1` → enter `10061`.
+- **↻ Reconnect** button: closes the current socket (including half-dead states) and re-handshakes from scratch — useful when the MCP server restarts and the plugin does not notice.
+- **Auto-run** toggle (default ON).
+- Feed showing pending code for review, streaming logs, and per-run results.
+- Auto-reconnect every 2.5s + `ping` heartbeat every 3s; fallback `ws://localhost` → `ws://127.0.0.1`.
 
-## Limitations đã biết (MVP)
+## Known limitations (MVP)
 
-- 1 plugin connection **active** tại một thời điểm **cho mỗi server instance** — kết nối mới sẽ **thay thế** (replace) kết nối cũ theo cơ chế last-man-wins (socket cũ đóng bằng close code `4001`, UI báo "Replaced", không tự reconnect). Muốn cắm nhiều plugin song song → chạy nhiều server với id khác nhau (`figma-mcp 1`, `figma-mcp 2`, …).
-- ⚠️ **Bảo mật**: mặc định HTTP bind `0.0.0.0` và **không có auth** — bất kỳ máy nào trong LAN/mạng gọi được cổng 10030+id đều có thể execute code trong Figma của bạn. Ở mạng không tin cậy: chạy sau firewall/VPN, hoặc `--host 127.0.0.1` rồi tunnel (ssh -L). Bridge WS của plugin cũng đang mở `0.0.0.0`.
-- Proxy chỉ đếm `figma.create*` top-level; `node.clone()` không đếm (vẫn bị giới hạn timeout tổng).
-- Sync recursion vô hạn không cắt được bằng tick (loop mới được instrument) — server watchdog trả `DISCONNECTED`, cần reload plugin.
-- `ws://localhost` từ trang https hoạt động ở đa số browser; nếu bị chặn, dùng Figma desktop app (xem architecture.md § Mixed content).
+- One **active** plugin connection at a time **per server instance** — a new connection **replaces** the old one (last-man-wins; the old socket is closed with close code `4001`, the UI reports "Replaced", and it does not auto-reconnect). To plug in multiple plugins in parallel → run multiple servers with different ids (`figma-mcp 1`, `figma-mcp 2`, …).
+- ⚠️ **Security**: HTTP binds `0.0.0.0` by default with **no auth** — any machine on the LAN/network that can reach port 10030+id can execute code in your Figma. On untrusted networks: run behind a firewall/VPN, or use `--host 127.0.0.1` and tunnel (ssh -L). The plugin WS bridge is also open on `0.0.0.0`.
+- The Proxy only counts top-level `figma.create*`; `node.clone()` is not counted (still bounded by the overall timeout).
+- Infinite synchronous recursion cannot be interrupted by ticks (only new loops are instrumented) — the server watchdog returns `DISCONNECTED`, and the plugin needs a reload.
+- `ws://localhost` from an https page works in most browsers; if blocked, use the Figma desktop app (see architecture.md § Mixed content).
 
-## Test nhanh validator/executor (không cần Figma)
+## Quick validator/executor tests (no Figma required)
 
 ```bash
 node plugin/tests/run-tests.mjs        # 27 unit tests: denylist, loop instrumentation, timeout/cancel/budget
