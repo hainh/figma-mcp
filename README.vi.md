@@ -1,3 +1,5 @@
+[English](README.md) | [Tiếng Việt](README.vi.md)
+
 # Figma MCP — "Claude Code for Figma"
 
 MCP server + Figma plugin: AI agent viết **JavaScript**, code được **AST-validate** rồi chạy trong **sandbox có timeout/budget** ngay trên plugin main thread với `figma.*`.
