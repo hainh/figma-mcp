@@ -167,6 +167,9 @@ Figma JS runtime rules (the code you write runs inside the Figma plugin main thr
 - Blocked (validation error POLICY): fetch, XMLHttpRequest, WebSocket, eval, Function, require, import(),
   globalThis, prototype-chain access (.constructor/.prototype/__proto__), dynamic obj[expr], figma.ui/showUI/settings.
 - Prefer returning a small JSON summary: return { created: [...ids], page: figma.currentPage.name };
+- Rollback: every run is wrapped in figma.commitUndo() on the plugin side, so a mistaken run (including
+  property changes on existing nodes) can be reverted as ONE step with the figma_undo tool.
+  Read-only helpers (get_document_info/get_selection) commit an empty group and are safe to call.
 - Screenshot/export pattern: node.exportAsync({ format: 'PNG'|'JPG' }) returns bytes; figma.base64Encode(bytes)
   returns a base64 string. Pass savePath to execute_code and the SERVER writes the decoded image to disk —
   the huge string never round-trips through the model. Example:
@@ -211,6 +214,18 @@ ${EXECUTE_SYSTEM_PROMPT}`,
     name: "get_selection",
     description: "Read-only helper: currently selected nodes (id, name, type, bounds).",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "figma_undo",
+    description:
+      "Roll back the last N execute_code runs in the open Figma file using the native undo stack (each run is one undo step). Use when a run corrupted the document — restores property changes too, not just created nodes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        steps: { type: "number", description: "Number of undo steps / runs to roll back (default 1, max 100)." },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: "cancel_execution",
@@ -302,6 +317,9 @@ function createMcpServer() {
           const result = await bridge.execute(code, { timeoutMs: 5000 });
           return jsonResult(result);
         }
+
+        case "figma_undo":
+          return jsonResult(await bridge.undo(args.steps));
 
         case "cancel_execution":
           return jsonResult({ sent: bridge.cancel(String(args.id)) });

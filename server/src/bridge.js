@@ -116,6 +116,31 @@ export class FigmaBridge {
     return true;
   }
 
+  /**
+   * Ask the plugin to roll back the last N execute_code runs (figma.triggerUndo,
+   * one commitUndo group per run). Resolves with the plugin's result shape.
+   */
+  undo(steps = 1) {
+    if (!this.connected) {
+      return Promise.resolve({
+        ok: false,
+        code: "NO_PLUGIN",
+        error: "Figma plugin is not connected. Open Figma, run the 'Figma MCP Connector' plugin, and confirm its UI shows 'Connected'.",
+      });
+    }
+    const id = `undo_${++this._seq}_${randomUUID().slice(0, 8)}`;
+    const msg = { type: "undo", id, steps: clampInt(steps, 1, 100, 1) };
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (!this.pending.has(id)) return;
+        this.pending.delete(id);
+        resolve({ ok: false, code: "DISCONNECTED", error: "Plugin did not respond to undo (watchdog).", logs: [] });
+      }, WATCHDOG_GRACE_MS + 3_000);
+      this.pending.set(id, { resolve, timer, logs: [] });
+      this._safeSend(msg);
+    });
+  }
+
   stop() {
     if (this.client) this._teardownHeartbeat(this.client);
     for (const [, entry] of this.pending) clearTimeout(entry.timer);

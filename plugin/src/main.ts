@@ -30,6 +30,7 @@ type UiToMainMessage =
 type ServerMessage =
   | { type: "hello"; role?: string; ok?: boolean; code?: string; protocolVersion?: number }
   | { type: "execute"; id: string; code: string; limits?: Partial<Limits> }
+  | { type: "undo"; id: string; steps?: number }
   | { type: "cancel"; id: string }
   | { type: "pong" };
 
@@ -169,6 +170,11 @@ function handleServerMessage(msg: ServerMessage): void {
       return;
     }
 
+    case "undo": {
+      onUndoRequest(msg);
+      return;
+    }
+
     case "cancel": {
       const run = inFlight.get(msg.id);
       if (run) {
@@ -238,6 +244,9 @@ function onExecuteRequest(msg: Extract<ServerMessage, { type: "execute" }>): voi
 async function startExecution(run: InFlightRun): Promise<void> {
   const { id, code, limits, control } = run;
   try {
+    // Wrap the whole run as ONE undo entry so figma_undo (triggerUndo) can roll it back,
+    // including property changes on pre-existing nodes (createdNodes tracking can't).
+    figma.commitUndo();
     const result = await runCode(code, limits, {
       control,
       onLog: (entry) => sendResult({ type: "log", id, level: entry.level, args: entry.args, logs: [] }),
@@ -260,7 +269,41 @@ async function startExecution(run: InFlightRun): Promise<void> {
     sendResult({ type: "result", id, ok: false, code: "RUNTIME", error: safeStringify(e), logs: [] });
     const err = e as { message?: string };
     notifyUi({ kind: "run-finished", id, ok: false, summary: String(err?.message ?? e) });
+  } finally {
+    // Close the undo group even if the run threw mid-way → next run/triggerUndo targets exactly this run.
+    try {
+      figma.commitUndo();
+    } catch {
+      /* ignore */
+    }
   }
+}
+
+function onUndoRequest(msg: Extract<ServerMessage, { type: "undo" }>): void {
+  const { id } = msg;
+  if (!id) return;
+  const requested = Math.max(1, Math.min(100, Math.round(Number(msg.steps) || 1)));
+  let undone = 0;
+  let error: string | undefined;
+  for (let i = 0; i < requested; i++) {
+    try {
+      figma.triggerUndo();
+      undone++;
+    } catch (e) {
+      const err = e as { message?: string };
+      error = String(err?.message ?? e);
+      break; // undo stack empty / nothing left to undo
+    }
+  }
+  sendResult({
+    type: "result",
+    id,
+    ok: undone > 0,
+    value: undone > 0 ? { undone, requested } : undefined,
+    code: undone > 0 ? undefined : "UNDO_FAILED",
+    error: undone > 0 ? undefined : error ?? "Undo stack is empty — nothing to roll back.",
+    logs: [],
+  });
 }
 
 // ================= helpers =================
