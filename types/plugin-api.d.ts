@@ -1,14 +1,4 @@
 
-declare type ArgFreeEventType =
-  | 'selectionchange'
-  | 'currentpagechange'
-  | 'close'
-  | 'timerstart'
-  | 'timerstop'
-  | 'timerpause'
-  | 'timerresume'
-  | 'timeradjust'
-  | 'timerdone'
 interface PluginAPI {
   readonly apiVersion: '1.0.0'
   readonly command: string
@@ -17,73 +7,27 @@ interface PluginAPI {
   readonly pluginId?: string
   readonly widgetId?: string
   readonly fileKey: string | undefined
-  skipInvisibleInstanceChildren: boolean
-  readonly timer?: TimerAPI
   readonly viewport: ViewportAPI
   readonly currentUser: User | null
   readonly activeUsers: ActiveUser[]
-  readonly textreview?: TextReviewAPI
-  readonly codegen: CodegenAPI
-  readonly vscode?: VSCodeAPI
-  readonly devResources?: DevResourcesAPI
-  readonly payments?: PaymentsAPI
   closePlugin(message?: string): void
   notify(message: string, options?: NotificationOptions): NotificationHandler
   commitUndo(): void
   triggerUndo(): void
-  saveVersionHistoryAsync(title: string, description?: string): Promise<VersionHistoryResult>
-  openExternal(url: string): void
   showUI(html: string, options?: ShowUIOptions): void
   readonly ui: UIAPI
   readonly util: UtilAPI
   readonly constants: ConstantsAPI
   readonly clientStorage: ClientStorageAPI
-  readonly parameters: ParametersAPI
   readonly motion: MotionAPI
   getNodeByIdAsync(id: string): Promise<BaseNode | null>
   getNodeById(id: string): BaseNode | null
   getStyleByIdAsync(id: string): Promise<BaseStyle | null>
   getStyleById(id: string): BaseStyle | null
   readonly variables: VariablesAPI
-  readonly teamLibrary: TeamLibraryAPI
-  readonly annotations: AnnotationsAPI
-  readonly buzz: BuzzAPI
   readonly root: DocumentNode
   currentPage: PageNode
   setCurrentPageAsync(page: PageNode): Promise<void>
-  on(type: ArgFreeEventType, callback: () => void): void
-  on(type: 'run', callback: (event: RunEvent) => void): void
-  on(type: 'drop', callback: (event: DropEvent) => boolean): void
-  on(type: 'documentchange', callback: (event: DocumentChangeEvent) => void): void
-  on(type: 'slidesviewchange', callback: (event: SlidesViewChangeEvent) => void): void
-  on(type: 'canvasviewchange', callback: (event: CanvasViewChangeEvent) => void): void
-  on(
-    type: 'textreview',
-    callback: (event: TextReviewEvent) => Promise<TextReviewRange[]> | TextReviewRange[],
-  ): void
-  on(type: 'stylechange', callback: (event: StyleChangeEvent) => void): void
-  once(type: ArgFreeEventType, callback: () => void): void
-  once(type: 'run', callback: (event: RunEvent) => void): void
-  once(type: 'drop', callback: (event: DropEvent) => boolean): void
-  once(type: 'documentchange', callback: (event: DocumentChangeEvent) => void): void
-  once(type: 'slidesviewchange', callback: (event: SlidesViewChangeEvent) => void): void
-  once(type: 'canvasviewchange', callback: (event: CanvasViewChangeEvent) => void): void
-  once(
-    type: 'textreview',
-    callback: (event: TextReviewEvent) => Promise<TextReviewRange[]> | TextReviewRange[],
-  ): void
-  once(type: 'stylechange', callback: (event: StyleChangeEvent) => void): void
-  off(type: ArgFreeEventType, callback: () => void): void
-  off(type: 'run', callback: (event: RunEvent) => void): void
-  off(type: 'drop', callback: (event: DropEvent) => boolean): void
-  off(type: 'documentchange', callback: (event: DocumentChangeEvent) => void): void
-  off(type: 'slidesviewchange', callback: (event: SlidesViewChangeEvent) => void): void
-  off(type: 'canvasviewchange', callback: (event: CanvasViewChangeEvent) => void): void
-  off(
-    type: 'textreview',
-    callback: (event: TextReviewEvent) => Promise<TextReviewRange[]> | TextReviewRange[],
-  ): void
-  off(type: 'stylechange', callback: (event: StyleChangeEvent) => void): void
   readonly mixed: unique symbol
   createRectangle(): RectangleNode
   createLine(): LineNode
@@ -107,7 +51,6 @@ interface PluginAPI {
   createSection(): SectionNode
   createTable(numRows?: number, numColumns?: number): TableNode
   createTextPath(node: VectorNode, startSegment: number, startPosition: number): TextPathNode
-  createNodeFromJSXAsync(jsx: any): Promise<SceneNode>
   createBooleanOperation(): BooleanOperationNode
   createPaintStyle(): PaintStyle
   createTextStyle(): TextStyle
@@ -143,11 +86,7 @@ interface PluginAPI {
   readonly hasMissingFont: boolean
   createNodeFromSvg(svg: string): FrameNode
   createImage(data: Uint8Array): Image
-  createImageAsync(src: string): Promise<Image>
   getImageByHash(hash: string): Image | null
-  createVideoAsync(data: Uint8Array): Promise<Video>
-  createLinkPreviewAsync(url: string): Promise<EmbedNode | LinkUnfurlNode>
-  createGif(hash: string): MediaNode
   combineAsVariants(
     nodes: ReadonlyArray<ComponentNode>,
     parent: BaseNode & ChildrenMixin,
@@ -188,13 +127,6 @@ interface PluginAPI {
   ungroup(node: SceneNode & ChildrenMixin): Array<SceneNode>
   base64Encode(data: Uint8Array): string
   base64Decode(data: string): Uint8Array
-  getFileThumbnailNodeAsync(): Promise<
-    FrameNode | ComponentNode | ComponentSetNode | SectionNode | null
-  >
-  getFileThumbnailNode(): FrameNode | ComponentNode | ComponentSetNode | SectionNode | null
-  setFileThumbnailNodeAsync(
-    node: FrameNode | ComponentNode | ComponentSetNode | SectionNode | null,
-  ): Promise<void>
   loadAllPagesAsync(): Promise<void>
   getSlideGrid(): Array<Array<SlideNode>>
   setSlideGrid(slideGrid: Array<Array<SlideNode>>): void
@@ -203,9 +135,6 @@ interface PluginAPI {
   createCanvasRow(rowIndex?: number): SceneNode
   moveNodesToCoord(nodeIds: string[], rowIndex?: number, columnIndex?: number): void
   loadBrushesAsync(brushType: 'STRETCH' | 'SCATTER'): Promise<void>
-}
-interface VersionHistoryResult {
-  id: string
 }
 interface VariablesAPI {
   getVariableByIdAsync(id: string): Promise<Variable | null>
@@ -249,104 +178,6 @@ interface VariablesAPI {
     variable: Variable | null,
   ): LayoutGrid
   importVariableByKeyAsync(key: string): Promise<Variable>
-}
-interface LibraryVariableCollection {
-  name: string
-  key: string
-  libraryName: string
-}
-interface LibraryVariable {
-  name: string
-  key: string
-  resolvedType: VariableResolvedDataType
-}
-interface AnnotationsAPI {
-  getAnnotationCategoriesAsync(): Promise<AnnotationCategory[]>
-  getAnnotationCategoryByIdAsync(id: string): Promise<AnnotationCategory | null>
-  addAnnotationCategoryAsync(categoryInput: {
-    label: string
-    color: AnnotationCategoryColor
-  }): Promise<AnnotationCategory>
-}
-interface BuzzAPI {
-  createFrame(rowIndex?: number, columnIndex?: number): FrameNode
-  createInstance(component: ComponentNode, rowIndex: number, columnIndex?: number): InstanceNode
-  getBuzzAssetTypeForNode(node: SceneNode): BuzzAssetType | null
-  setBuzzAssetTypeForNode(node: SceneNode, assetType: BuzzAssetType): void
-  getTextContent(node: SceneNode): BuzzTextField[]
-  getMediaContent(node: SceneNode): BuzzMediaField[]
-  smartResize(node: SceneNode, width: number, height: number): void
-}
-interface BuzzTextField {
-  readonly value: string | null
-  readonly node: TextNode | null
-  setValueAsync(value: string): Promise<void>
-}
-interface BuzzMediaField {
-  readonly type: 'IMAGE' | 'VIDEO' | null
-  readonly hash: string | null
-  readonly node: SceneNode | null
-  setMediaAsync(paint: ImagePaint | VideoPaint): Promise<void>
-}
-type BuzzAssetType =
-  | 'CUSTOM'
-  | 'TWITTER_POST'
-  | 'LINKEDIN_POST'
-  | 'INSTA_POST_SQUARE'
-  | 'INSTA_POST_PORTRAIT'
-  | 'INSTA_STORY'
-  | 'INSTA_AD'
-  | 'FACEBOOK_POST'
-  | 'FACEBOOK_COVER_PHOTO'
-  | 'FACEBOOK_EVENT_COVER'
-  | 'FACEBOOK_AD_PORTRAIT'
-  | 'FACEBOOK_AD_SQUARE'
-  | 'PINTEREST_AD_PIN'
-  | 'TWITTER_BANNER'
-  | 'LINKEDIN_POST_SQUARE'
-  | 'LINKEDIN_POST_PORTRAIT'
-  | 'LINKEDIN_POST_LANDSCAPE'
-  | 'LINKEDIN_PROFILE_BANNER'
-  | 'LINKEDIN_ARTICLE_BANNER'
-  | 'LINKEDIN_AD_LANDSCAPE'
-  | 'LINKEDIN_AD_SQUARE'
-  | 'LINKEDIN_AD_VERTICAL'
-  | 'YOUTUBE_THUMBNAIL'
-  | 'YOUTUBE_BANNER'
-  | 'YOUTUBE_AD'
-  | 'TWITCH_BANNER'
-  | 'GOOGLE_LEADERBOARD_AD'
-  | 'GOOGLE_LARGE_AD'
-  | 'GOOGLE_MED_AD'
-  | 'GOOGLE_MOBILE_BANNER_AD'
-  | 'GOOGLE_SKYSCRAPER_AD'
-  | 'CARD_HORIZONTAL'
-  | 'CARD_VERTICAL'
-  | 'PRINT_US_LETTER'
-  | 'POSTER'
-  | 'BANNER_STANDARD'
-  | 'BANNER_WIDE'
-  | 'BANNER_ULTRAWIDE'
-  | 'NAME_TAG_PORTRAIT'
-  | 'NAME_TAG_LANDSCAPE'
-  | 'INSTA_REEL_COVER'
-  | 'ZOOM_BACKGROUND'
-interface TeamLibraryAPI {
-  getAvailableLibraryVariableCollectionsAsync(): Promise<LibraryVariableCollection[]>
-  getVariablesInLibraryCollectionAsync(libraryCollectionKey: string): Promise<LibraryVariable[]>
-}
-type PaymentStatus = {
-  type: 'UNPAID' | 'PAID' | 'NOT_SUPPORTED'
-}
-interface PaymentsAPI {
-  readonly status: PaymentStatus
-  setPaymentStatusInDevelopment(status: PaymentStatus): void
-  getUserFirstRanSecondsAgo(): number
-  initiateCheckoutAsync(options?: {
-    interstitial?: 'PAID_FEATURE' | 'TRIAL_ENDED' | 'SKIP'
-  }): Promise<void>
-  requestCheckout(): void
-  getPluginPaymentTokenAsync(): Promise<string>
 }
 interface ClientStorageAPI {
   getAsync(key: string): Promise<any | undefined>
@@ -422,118 +253,6 @@ interface ColorPalettes {
 interface ConstantsAPI {
   colors: ColorPalettes
 }
-declare type CodegenEvent = {
-  node: SceneNode
-  language: string
-}
-declare type CodegenPreferences = {
-  readonly unit: 'PIXEL' | 'SCALED'
-  readonly scaleFactor?: number
-  readonly customSettings: Record<string, string>
-}
-declare type CodegenPreferencesEvent = {
-  propertyName: string
-}
-declare type CodegenResult = {
-  title: string
-  code: string
-  language:
-    | 'TYPESCRIPT'
-    | 'CPP'
-    | 'RUBY'
-    | 'CSS'
-    | 'JAVASCRIPT'
-    | 'HTML'
-    | 'JSON'
-    | 'GRAPHQL'
-    | 'PYTHON'
-    | 'GO'
-    | 'SQL'
-    | 'SWIFT'
-    | 'KOTLIN'
-    | 'RUST'
-    | 'BASH'
-    | 'PLAINTEXT'
-}
-interface CodegenAPI {
-  on(
-    type: 'generate',
-    callback: (event: CodegenEvent) => Promise<CodegenResult[]> | CodegenResult[],
-  ): void
-  on(type: 'preferenceschange', callback: (event: CodegenPreferencesEvent) => Promise<void>): void
-  once(
-    type: 'generate',
-    callback: (event: CodegenEvent) => Promise<CodegenResult[]> | CodegenResult[],
-  ): void
-  once(type: 'preferenceschange', callback: (event: CodegenPreferencesEvent) => Promise<void>): void
-  off(
-    type: 'generate',
-    callback: (event: CodegenEvent) => Promise<CodegenResult[]> | CodegenResult[],
-  ): void
-  off(type: 'preferenceschange', callback: (event: CodegenPreferencesEvent) => Promise<void>): void
-  readonly preferences: CodegenPreferences
-  refresh: () => void
-}
-interface DevResource {
-  readonly name: string
-  readonly url: string
-  readonly inheritedNodeId?: string
-}
-interface DevResourceWithNodeId extends DevResource {
-  nodeId: string
-}
-type LinkPreviewEvent = {
-  link: DevResource
-}
-type PlainTextElement = {
-  type: 'PLAIN_TEXT'
-  text: string
-}
-type LinkPreviewResult =
-  | {
-      type: 'AUTH_REQUIRED'
-    }
-  | PlainTextElement
-  | null
-type AuthEvent = {
-  links: DevResource[]
-}
-type DevResourceOpenEvent = {
-  devResource: DevResourceWithNodeId
-}
-type AuthResult = {
-  type: 'AUTH_SUCCESS'
-} | null
-interface VSCodeAPI {}
-interface DevResourcesAPI {
-  on(
-    type: 'linkpreview',
-    callback: (event: LinkPreviewEvent) => Promise<LinkPreviewResult> | LinkPreviewResult,
-  ): void
-  on(type: 'auth', callback: (event: AuthEvent) => Promise<AuthResult> | AuthResult): void
-  on(type: 'open', callback: (event: DevResourceOpenEvent) => void): void
-  once(
-    type: 'linkpreview',
-    callback: (event: LinkPreviewEvent) => Promise<LinkPreviewResult> | LinkPreviewResult,
-  ): void
-  once(type: 'auth', callback: (event: AuthEvent) => Promise<AuthResult> | AuthResult): void
-  once(type: 'open', callback: (event: DevResourceOpenEvent) => void): void
-  off(
-    type: 'linkpreview',
-    callback: (event: LinkPreviewEvent) => Promise<LinkPreviewResult> | LinkPreviewResult,
-  ): void
-  off(type: 'auth', callback: (event: AuthEvent) => Promise<AuthResult> | AuthResult): void
-  off(type: 'open', callback: (event: DevResourceOpenEvent) => void): void
-}
-interface TimerAPI {
-  readonly remaining: number
-  readonly total: number
-  readonly state: 'STOPPED' | 'PAUSED' | 'RUNNING'
-  pause: () => void
-  resume: () => void
-  start: (seconds: number) => void
-  stop: () => void
-}
 interface ViewportAPI {
   center: Vector
   zoom: number
@@ -542,129 +261,6 @@ interface ViewportAPI {
   slidesView: 'grid' | 'single-slide'
   canvasView: 'grid' | 'single-asset'
 }
-interface TextReviewAPI {
-  requestToBeEnabledAsync(): Promise<void>
-  requestToBeDisabledAsync(): Promise<void>
-  readonly isEnabled: boolean
-}
-interface ParameterValues {
-  [key: string]: any
-}
-interface SuggestionResults {
-  setSuggestions(
-    suggestions: Array<
-      | string
-      | {
-          name: string
-          data?: any
-          icon?: string | Uint8Array
-          iconUrl?: string
-        }
-    >,
-  ): void
-  setError(message: string): void
-  setLoadingMessage(message: string): void
-}
-declare type ParameterInputEvent<ParametersType = ParameterValues> = {
-  query: string
-  key: string
-  parameters: Partial<ParametersType>
-  result: SuggestionResults
-}
-interface ParametersAPI {
-  on(type: 'input', callback: (event: ParameterInputEvent) => void): void
-  once(type: 'input', callback: (event: ParameterInputEvent) => void): void
-  off(type: 'input', callback: (event: ParameterInputEvent) => void): void
-}
-interface RunParametersEvent<ParametersType = ParameterValues | undefined> {
-  command: string
-  parameters: ParametersType
-}
-interface OpenDevResourcesEvent {
-  command: 'open-dev-resource'
-  parameters?: undefined
-  link: {
-    url: string
-    name: string
-  }
-}
-type RunEvent = RunParametersEvent | OpenDevResourcesEvent
-interface SlidesViewChangeEvent {
-  view: 'GRID' | 'SINGLE_SLIDE'
-}
-interface CanvasViewChangeEvent {
-  view: 'SINGLE_ASSET' | 'GRID'
-}
-interface DropEvent {
-  node: BaseNode | SceneNode
-  x: number
-  y: number
-  absoluteX: number
-  absoluteY: number
-  items: DropItem[]
-  files: DropFile[]
-  dropMetadata?: any
-}
-interface DropItem {
-  type: string
-  data: string
-}
-interface DropFile {
-  name: string
-  type: string
-  getBytesAsync(): Promise<Uint8Array>
-  getTextAsync(): Promise<string>
-}
-interface DocumentChangeEvent {
-  documentChanges: DocumentChange[]
-}
-interface StyleChangeEvent {
-  styleChanges: StyleChange[]
-}
-type StyleChange = StyleCreateChange | StyleDeleteChange | StylePropertyChange
-interface BaseDocumentChange {
-  id: string
-  origin: 'LOCAL' | 'REMOTE'
-}
-interface BaseNodeChange extends BaseDocumentChange {
-  node: SceneNode | RemovedNode
-}
-interface RemovedNode {
-  readonly removed: true
-  readonly type: NodeType
-  readonly id: string
-}
-interface CreateChange extends BaseNodeChange {
-  type: 'CREATE'
-}
-interface DeleteChange extends BaseNodeChange {
-  type: 'DELETE'
-}
-interface PropertyChange extends BaseNodeChange {
-  type: 'PROPERTY_CHANGE'
-  properties: NodeChangeProperty[]
-}
-interface BaseStyleChange extends BaseDocumentChange {
-  style: BaseStyle | null
-}
-interface StyleCreateChange extends BaseStyleChange {
-  type: 'STYLE_CREATE'
-}
-interface StyleDeleteChange extends BaseStyleChange {
-  type: 'STYLE_DELETE'
-  style: null
-}
-interface StylePropertyChange extends BaseStyleChange {
-  type: 'STYLE_PROPERTY_CHANGE'
-  properties: StyleChangeProperty[]
-}
-type DocumentChange =
-  | CreateChange
-  | DeleteChange
-  | PropertyChange
-  | StyleCreateChange
-  | StyleDeleteChange
-  | StylePropertyChange
 type NodeChangeProperty =
   | 'pointCount'
   | 'name'
@@ -798,41 +394,6 @@ type NodeChangeProperty =
   | 'animationStyles'
   | 'animations'
   | 'manualKeyframeTracks'
-interface NodeChangeEvent {
-  nodeChanges: NodeChange[]
-}
-type NodeChange = CreateChange | DeleteChange | PropertyChange
-type StyleChangeProperty =
-  | 'name'
-  | 'pluginData'
-  | 'type'
-  | 'description'
-  | 'remote'
-  | 'documentationLinks'
-  | 'fontSize'
-  | 'textDecoration'
-  | 'letterSpacing'
-  | 'lineHeight'
-  | 'leadingTrim'
-  | 'paragraphIndent'
-  | 'paragraphSpacing'
-  | 'textWrapStyle'
-  | 'listSpacing'
-  | 'hangingPunctuation'
-  | 'hangingList'
-  | 'textCase'
-  | 'paint'
-  | 'effects'
-  | 'layoutGrids'
-type TextReviewEvent = {
-  text: string
-}
-type TextReviewRange = {
-  start: number
-  end: number
-  suggestions: string[]
-  color?: 'RED' | 'GREEN' | 'BLUE'
-}
 type Transform = [[number, number, number], [number, number, number]]
 interface Vector {
   readonly x: number
@@ -2050,7 +1611,7 @@ type ConnectorStrokeCap =
   | 'ERD_ONE_OR_MORE'
   | 'ERD_ONE'
   | 'ERD_MANY'
-interface BaseNodeMixin extends PluginDataMixin, DevResourcesMixin {
+interface BaseNodeMixin extends PluginDataMixin {
   readonly id: string
   readonly parent: (BaseNode & ChildrenMixin) | null
   name: string
@@ -2074,19 +1635,6 @@ interface PluginDataMixin {
   getSharedPluginData(namespace: string, key: string): string
   setSharedPluginData(namespace: string, key: string, value: string): void
   getSharedPluginDataKeys(namespace: string): string[]
-}
-interface DevResourcesMixin {
-  getDevResourcesAsync(options?: { includeChildren?: boolean }): Promise<DevResourceWithNodeId[]>
-  addDevResourceAsync(url: string, name?: string): Promise<void>
-  editDevResourceAsync(
-    currentUrl: string,
-    newValue: {
-      name?: string
-      url?: string
-    },
-  ): Promise<void>
-  deleteDevResourceAsync(url: string): Promise<void>
-  setDevResourcePreviewAsync(url: string, preview: PlainTextElement): Promise<void>
 }
 interface DevStatusMixin {
   devStatus: DevStatus
@@ -2822,9 +2370,6 @@ interface PageNode
   readonly prototypeStartNode: FrameNode | GroupNode | ComponentNode | InstanceNode | null
   readonly isPageDivider: boolean
   loadAsync(): Promise<void>
-  on(type: 'nodechange', callback: (event: NodeChangeEvent) => void): void
-  once(type: 'nodechange', callback: (event: NodeChangeEvent) => void): void
-  off(type: 'nodechange', callback: (event: NodeChangeEvent) => void): void
   focusedSlide?: SlideNode | null
   focusedNode: SceneNode | null
 }
@@ -3301,17 +2846,6 @@ interface ExtendedVariableCollection extends Omit<VariableCollection, 'addMode'>
   }>
   removeMode(modeId: string): void
 }
-type AnnotationCategoryColor =
-  'yellow' | 'orange' | 'red' | 'pink' | 'violet' | 'blue' | 'teal' | 'green'
-interface AnnotationCategory {
-  readonly id: string
-  readonly label: string
-  readonly color: AnnotationCategoryColor
-  readonly isPreset: boolean
-  remove(): void
-  setColor(color: AnnotationCategoryColor): void
-  setLabel(label: string): void
-}
 interface WidgetNode extends OpaqueNodeMixin, StickableMixin {
   readonly type: 'WIDGET'
   readonly widgetId: string
@@ -3549,9 +3083,6 @@ interface Image {
     width: number
     height: number
   }>
-}
-interface Video {
-  readonly hash: string
 }
 interface BaseUser {
   readonly id: string | null
