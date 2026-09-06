@@ -159,22 +159,69 @@ const bridge = new FigmaBridge({ port: PLUGIN_PORT, id: options.id });
 
 const EXECUTE_SYSTEM_PROMPT = `
 Figma JS runtime rules (the code you write runs inside the Figma plugin main thread, sandboxed):
-- Available: "figma" (proxied API), "console" (captured & streamed back to you), "helpers".
-- helpers.createText(chars, { fontSize, fontName, color }) → loads a font for you and returns a TextNode.
-  NEVER do "figma.createText(); t.characters = ..." directly without await figma.loadFontAsync(...) first — it throws.
+
+ENVIRONMENT
+- Available: "figma" (sandboxed API), "console" (captured & streamed back to you), "helpers".
 - Code is wrapped in an async function: you may use top-level "await" and top-level "return { ... }".
-- Loops are instrumented with a cooperative timeout; a run exceeding limits is cancelled with code TIMEOUT.
-- Blocked (validation error POLICY): fetch, XMLHttpRequest, WebSocket, eval, Function, require, import(),
-  globalThis, prototype-chain access (.constructor/.prototype/__proto__), dynamic obj[expr], figma.ui/showUI/settings.
-- Prefer returning a small JSON summary: return { created: [...ids], page: figma.currentPage.name };
+- Return a small JSON-serializable summary (ids, names, counts). Node objects serialize to
+  "[TYPE id \\"name\\"]" — never return whole trees or read many deep props in one run.
+- Loops are instrumented with a cooperative timeout; exceeding it fails with code TIMEOUT.
+  For heavy runs raise timeoutMs (default 5000, max 60000). Budgets: maxNodes (default 1000
+  figma.create* calls), maxCommands (default 10000 loop iterations). Batch edits instead of
+  creating throwaway nodes.
+
+POLICY — rejected statically BEFORE running (fix code, don't retry as-is):
+- Blocked identifiers: fetch, XMLHttpRequest, WebSocket, eval, Function, require, import(),
+  globalThis, global, window, self, module, exports, process, WebAssembly, Atomics, SharedArrayBuffer.
+  They are banned EVEN AS YOUR OWN variable/function names.
+- Blocked members: .constructor, .prototype, __proto__ (prototype-chain); figma.ui/showUI/
+  settings/notify/on/off/once/emit/fileKey.
+- Dynamic computed access obj[expr] is blocked by design (static denylist can't resolve expr;
+  obj["con"+"structor"] would bypass it). Only string/number literals in brackets pass:
+  obj['prop'], arr[0] are FINE; arr[i] with a variable/expression is a POLICY error.
+  Rewrite indexed loops as:
+    for (const child of node.children) {...}     // not: for (let i=0;i<n;i++) node.children[i]
+    const v = arr.at(i)                          // not: arr[i]
+    const { first, second } = arr                // destructuring
+    list.map((x) => ...) / forEach / filter / find
+- "this" is not allowed anywhere in your code — use arrow functions and closures.
+- No import/export statements, no with, no labeled statements.
+
+TEXT / FONT (most common RUNTIME errors):
+- NEVER "figma.createText(); t.characters = ..." without loading a font first — it throws.
+  Use helpers.createText(chars, { fontSize, fontName, color }) instead; it handles loadFontAsync.
+- Editing EXISTING text: await helpers.setAllText(node, "new text") (loads current font for you).
+  If node.fontName === figma.mixed, first: await figma.loadFontAsync(helpers.DEFAULT_FONT);
+  node.setRangeFontName(0, node.characters.length, helpers.DEFAULT_FONT); then setAllText.
+- After changing characters, font size may report mixed → wrap fontSize writes in try/catch
+  or set range font size before characters.
+
+FIGMA API PITFALLS:
+- Look up nodes with "await figma.getNodeByIdAsync(id)" (the sync getNodeById is deprecated/throws).
+- Setting x/y on a child of an auto-layout frame throws; use layoutPositioning='ABSOLUTE' or
+  parentLayoutMode none. Prefer appending into plain frames when positioning freely.
+- fills/strokes/effects are read-only-ish arrays: always assign the FULL new array
+  (node.fills = [{ type:'SOLID', color: helpers.color('#ff0000') }]). Mutating the read array does nothing.
+- Resize via node.resize(w, h); setting .width/.height directly throws for most node types.
+- Before mutating a node from a COMPONENT/INSTANCE, check node.type / mainComponent — overriding
+  instance properties can throw; detach or edit the main component instead.
+- Put the node in the page graph (appendChild) BEFORE reading layout-dependent props.
+
+SCREENSHOT / EXPORT:
+- node.exportAsync({ format: 'PNG'|'JPG' }) returns bytes; figma.base64Encode(bytes) → base64 string.
+  ALWAYS use scale 1 (never higher). Pass savePath to execute_code so the SERVER writes the image
+  to disk — the huge base64 never round-trips through the model. Example:
+    const bytes = await node.exportAsync({ format: 'JPG', quality: 80 }); return figma.base64Encode(bytes);
+  with { savePath: "/abs/path/out.jpg" } → result.value = { savedTo, bytes }.
+- Text/vector nodes may export blank when off-screen or clipped — export a parent frame instead.
+
+ERROR HANDLING:
+- If ok:false, read error + logs, fix, retry — same error repeating means the fix didn't address the cause.
+- A failed run may have ALREADY created nodes (see createdNodes): clean them up or roll the whole
+  run back with the figma_undo tool (every run is wrapped in commitUndo) rather than leaving partial state.
 - Rollback: every run is wrapped in figma.commitUndo() on the plugin side, so a mistaken run (including
   property changes on existing nodes) can be reverted as ONE step with the figma_undo tool.
   Read-only helpers (get_document_info/get_selection) commit an empty group and are safe to call.
-- Screenshot/export pattern: node.exportAsync({ format: 'PNG'|'JPG' }) returns bytes; figma.base64Encode(bytes)
-  returns a base64 string. Pass savePath to execute_code and the SERVER writes the decoded image to disk —
-  the huge string never round-trips through the model. Example:
-    const bytes = await node.exportAsync({ format: 'JPG', quality: 80 }); return figma.base64Encode(bytes);
-  with { savePath: "/abs/path/out.jpg" } → result.value = { savedTo, bytes }.
 `.trim();
 
 const tools = [
