@@ -64,6 +64,96 @@ interface InFlightRun {
 
 figma.showUI(__html__, { width: 380, height: 520 });
 
+// ==================== dynamic-page safety ====================
+/**
+ * `manifest.json` uses `documentAccess: "dynamic-page"`, so reading `page.children`
+ * before the page is loaded throws:
+ * "Cannot access property `children` on a page that has not been explicitly loaded."
+ *
+ * Pre-load every page before AI code runs. The plugin is intentionally allowed to use
+ * lazy APIs; this guarantees generated code can never hit that cold-page error.
+ */
+const loadedPageIds = new Set<string>();
+let pagesLoading: Promise<void> | null = null;
+
+function pendingPageNodes(): PageNode[] {
+  const pending: PageNode[] = [];
+  for (const page of figma.root.children) {
+    if (!loadedPageIds.has(page.id)) pending.push(page);
+  }
+  return pending;
+}
+
+async function loadOnePage(page: PageNode): Promise<void> {
+  const loadPage = (page as unknown as { loadAsync?: () => Promise<void> }).loadAsync;
+  if (typeof loadPage === "function") await loadPage.call(page);
+  loadedPageIds.add(page.id);
+}
+
+async function loadAllPagesViaBatchApi(): Promise<boolean> {
+  const figmaWithLoadAll = figma as unknown as { loadAllPagesAsync?: () => Promise<void> };
+  const loadAllPagesAsync = figmaWithLoadAll.loadAllPagesAsync;
+  if (typeof loadAllPagesAsync !== "function") return false;
+
+  // Snapshot first: pages created while the batch load is in flight remain pending below.
+  const pagesBeforeBatch = Array.from(figma.root.children);
+  await loadAllPagesAsync.call(figma);
+  for (const page of pagesBeforeBatch) loadedPageIds.add(page.id);
+  return true;
+}
+
+async function doEnsurePagesLoaded(): Promise<void> {
+  const currentPage = figma.currentPage;
+  if (!loadedPageIds.has(currentPage.id)) {
+    await loadOnePage(currentPage);
+  }
+
+  let triedBatchLoad = false;
+  for (let pass = 0; pass < 20; pass++) {
+    const pending = pendingPageNodes();
+    if (pending.length === 0) return;
+
+    if (!triedBatchLoad) {
+      triedBatchLoad = true;
+      if (await loadAllPagesViaBatchApi()) continue;
+    }
+
+    for (const page of pending) {
+      await loadOnePage(page);
+    }
+  }
+
+  const stillPending = pendingPageNodes().map((p) => p.id);
+  throw new Error(`Could not load ${stillPending.length} Figma page(s) before execution: ${stillPending.join(", ")}`);
+}
+
+function ensurePagesLoaded(): Promise<void> {
+  if (pagesLoading) return pagesLoading;
+
+  const run = doEnsurePagesLoaded().then(
+    () => {
+      if (pagesLoading === run) pagesLoading = null;
+    },
+    (e) => {
+      if (pagesLoading === run) pagesLoading = null;
+      throw e;
+    }
+  );
+  pagesLoading = run;
+  return run;
+}
+
+function preloadPagesInBackground(): void {
+  ensurePagesLoaded().catch(() => {
+    /* startExecution retries and surfaces the error if a run needs the pages now */
+  });
+}
+
+preloadPagesInBackground();
+figma.on("currentpagechange", () => {
+  preloadPagesInBackground();
+});
+
 /** Bridge port chosen by the user (persisted via clientStorage) — the UI connects to this port. */
 let wsPort = DEFAULT_WS_PORT;
 
@@ -96,6 +186,7 @@ figma.ui.onmessage = async (msg: UiToMainMessage) => {
       // UI opened / reconnected the WS successfully → send (or re-send) hello with file metadata.
       // The server needs a fresh hello because a new WS connection = a new session.
       sendToWs(buildHello());
+      preloadPagesInBackground();
       return;
     }
 
@@ -243,10 +334,44 @@ function onExecuteRequest(msg: Extract<ServerMessage, { type: "execute" }>): voi
 
 async function startExecution(run: InFlightRun): Promise<void> {
   const { id, code, limits, control } = run;
+  let undoOpened = false;
   try {
+    if (control.cancelled) {
+      inFlight.delete(id);
+      sendResult({
+        type: "result",
+        id,
+        ok: false,
+        code: "CANCELLED",
+        error: "Cancelled before execution.",
+        logs: [],
+      });
+      notifyUi({ kind: "run-finished", id, ok: false, summary: "cancelled" });
+      return;
+    }
+
+    // Must happen BEFORE any AI code touches page.children. Awaiting the shared loader
+    // also coalesces the background preload that starts on connect.
+    await ensurePagesLoaded();
+
+    if (control.cancelled) {
+      inFlight.delete(id);
+      sendResult({
+        type: "result",
+        id,
+        ok: false,
+        code: "CANCELLED",
+        error: "Cancelled while loading document pages.",
+        logs: [],
+      });
+      notifyUi({ kind: "run-finished", id, ok: false, summary: "cancelled" });
+      return;
+    }
+
     // Wrap the whole run as ONE undo entry so figma_undo (triggerUndo) can roll it back,
     // including property changes on pre-existing nodes (createdNodes tracking can't).
     figma.commitUndo();
+    undoOpened = true;
     const result = await runCode(code, limits, {
       control,
       onLog: (entry) => sendResult({ type: "log", id, level: entry.level, args: entry.args, logs: [] }),
@@ -270,11 +395,13 @@ async function startExecution(run: InFlightRun): Promise<void> {
     const err = e as { message?: string };
     notifyUi({ kind: "run-finished", id, ok: false, summary: String(err?.message ?? e) });
   } finally {
-    // Close the undo group even if the run threw mid-way → next run/triggerUndo targets exactly this run.
-    try {
-      figma.commitUndo();
-    } catch {
-      /* ignore */
+    // Close the undo group only if this run actually opened one.
+    if (undoOpened) {
+      try {
+        figma.commitUndo();
+      } catch {
+        /* ignore */
+      }
     }
   }
 }
