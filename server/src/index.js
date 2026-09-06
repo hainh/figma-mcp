@@ -163,6 +163,7 @@ Figma JS runtime rules (the code you write runs inside the Figma plugin main thr
 ENVIRONMENT
 - Available: "figma" (sandboxed API), "console" (captured & streamed back to you), "helpers".
 - Code is wrapped in an async function: you may use top-level "await" and top-level "return { ... }".
+  Also prefer async methods of Figma API over sync ones.
 - Return a small JSON-serializable summary (ids, names, counts). Node objects serialize to
   "[TYPE id \\"name\\"]" — never return whole trees or read many deep props in one run.
 - Loops are instrumented with a cooperative timeout; exceeding it fails with code TIMEOUT.
