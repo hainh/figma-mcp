@@ -21,9 +21,7 @@ interface PluginAPI {
 	readonly clientStorage: ClientStorageAPI
 	readonly motion: MotionAPI
 	getNodeByIdAsync(id: string): Promise<BaseNode | null>
-	getNodeById(id: string): BaseNode | null
 	getStyleByIdAsync(id: string): Promise<BaseStyle | null>
-	getStyleById(id: string): BaseStyle | null
 	readonly variables: VariablesAPI
 	readonly root: DocumentNode
 	currentPage: PageNode
@@ -57,13 +55,9 @@ interface PluginAPI {
 	createEffectStyle(): EffectStyle
 	createGridStyle(): GridStyle
 	getLocalPaintStylesAsync(): Promise<PaintStyle[]>
-	getLocalPaintStyles(): PaintStyle[]
 	getLocalTextStylesAsync(): Promise<TextStyle[]>
-	getLocalTextStyles(): TextStyle[]
 	getLocalEffectStylesAsync(): Promise<EffectStyle[]>
-	getLocalEffectStyles(): EffectStyle[]
 	getLocalGridStylesAsync(): Promise<GridStyle[]>
-	getLocalGridStyles(): GridStyle[]
 	getSelectionColors(): null | {
 		paints: Paint[]
 		styles: PaintStyle[]
@@ -138,13 +132,9 @@ interface PluginAPI {
 }
 interface VariablesAPI {
 	getVariableByIdAsync(id: string): Promise<Variable | null>
-	getVariableById(id: string): Variable | null
 	getVariableCollectionByIdAsync(id: string): Promise<VariableCollection | null>
-	getVariableCollectionById(id: string): VariableCollection | null
 	getLocalVariablesAsync(type?: VariableResolvedDataType): Promise<Variable[]>
-	getLocalVariables(type?: VariableResolvedDataType): Variable[]
 	getLocalVariableCollectionsAsync(): Promise<VariableCollection[]>
-	getLocalVariableCollections(): VariableCollection[]
 	createVariable(
 		name: string,
 		collectionId: string,
@@ -2238,10 +2228,8 @@ interface BaseNonResizableTextMixin {
 	setRangeFills(start: number, end: number, value: Paint[]): void
 	getRangeTextStyleId(start: number, end: number): string | PluginAPI['mixed']
 	setRangeTextStyleIdAsync(start: number, end: number, styleId: string): Promise<void>
-	setRangeTextStyleId(start: number, end: number, value: string): void
 	getRangeFillStyleId(start: number, end: number): string | PluginAPI['mixed']
 	setRangeFillStyleIdAsync(start: number, end: number, styleId: string): Promise<void>
-	setRangeFillStyleId(start: number, end: number, value: string): void
 	getRangeBoundVariable(
 		start: number,
 		end: number,
