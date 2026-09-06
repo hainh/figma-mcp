@@ -6,7 +6,10 @@ import { WebSocketServer } from "ws";
  *
  * Protocol (see architecture.md § protocol rules):
  *  - hello handshake, sent by the plugin on connect (fileKey/fileName/protocolVersion)
- *  - ping/pong heartbeat: plugin pings every 3s, disconnect after 10s of silence
+ *  - ping/pong heartbeat: the SERVER sends RFC-6455 protocol-level pings every 3s; the
+ *    browser's network stack answers with a pong automatically even when the plugin UI's
+ *    JS timers are throttled/frozen (hidden or minimized Figma window). Drop after 10s of silence.
+ *    The legacy app-level {type:"ping"} from the plugin UI is still accepted as a liveness signal.
  *  - execute → log (streaming) → result (a single shape, ok true/false)
  *  - cancel: fire-and-forget from the server
  *  - ONE active plugin connection per server instance at a time. When a new plugin
@@ -17,6 +20,7 @@ import { WebSocketServer } from "ws";
  */
 
 const PROTOCOL_VERSION = 1;
+const HEARTBEAT_PING_MS = 3_000;
 const HEARTBEAT_TIMEOUT_MS = 10_000;
 const WATCHDOG_GRACE_MS = 2_000; // server-side watchdog = timeoutMs + grace
 /** Close code telling the plugin UI it was intentionally replaced → do NOT auto-reconnect. */
@@ -176,9 +180,16 @@ export class FigmaBridge {
       if (Date.now() - ws.__lastPongAt > HEARTBEAT_TIMEOUT_MS) {
         console.error("[figma-mcp] heartbeat lost, dropping plugin connection");
         ws.terminate();
+        return;
       }
-    }, 3_000);
+      // Protocol-level ping: the browser answers at the network layer, independent of
+      // JS timers (which Chromium freezes in hidden/throttled plugin UIs).
+      if (ws.readyState === 1 /* OPEN */) {
+        try { ws.ping(); } catch { /* socket dying — close handler will clean up */ }
+      }
+    }, HEARTBEAT_PING_MS);
 
+    ws.on("pong", () => { ws.__lastPongAt = Date.now(); });
     ws.on("message", (raw) => this._onMessage(ws, raw));
     ws.on("close", () => this._onClose(ws));
     ws.on("error", () => this._onClose(ws));
