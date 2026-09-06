@@ -16,7 +16,8 @@
       }
       * { box-sizing: border-box; margin: 0; padding: 0; font-size: 12px; }
       body { font-family: Inter, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
-      header { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+      header { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+      header .conn { flex: 1; }
       footer { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
       .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--err); flex-shrink: 0; }
       .dot.on { background: var(--ok); }
@@ -41,6 +42,12 @@
       input[type="number"]:focus { outline: 1px solid var(--accent); }
       .port-label { color: var(--dim); font-size: 11px; }
       .save { background: #3a3a3a; color: var(--text); }
+      .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+      .card-head h3 { flex: 1; margin-bottom: 0; }
+      .expand { background: #3a3a3a; color: var(--dim); font-weight: 400; padding: 2px 8px; font-size: 10px; }
+      .expand:hover { color: var(--text); }
+      pre.code.collapsed { display: none; }
+      pre.code.full { max-height: none; }
     </style>
   </head>
   <body>
@@ -50,6 +57,7 @@
         <input type="number" id="port" min="1" max="65535" step="1" value="10060" />
         <button id="reconnect" class="save" title="Close the current connection and reconnect to the same port">↻ Reconnect</button>
       </div>
+      <button id="clear" class="save" title="Remove all log cards from the feed">🗑 Clear</button>
     </header>
     <main id="feed"></main>
     <footer>
@@ -118,6 +126,7 @@
             }
             return;                                            // KHÔNG forward hello/pong xuống main
           }
+          if (msg.type === "execute" && msg.id) runCodes.set(msg.id, typeof msg.code === "string" ? msg.code : "");
           parent.postMessage({ pluginMessage: { kind: "ws-message", data: ev.data } }, "*");
         };
         ws.onclose = (ev) => {
@@ -256,6 +265,14 @@
         connect(); // onopen reports ws-reconnected → main sends a fresh hello
       };
 
+      // ===== Clear button: drop every log card from the feed =====
+      const clearBtn = document.getElementById("clear");
+      clearBtn.onclick = () => {
+        feed.textContent = "";
+        cards.clear();
+        runCodes.clear();
+      };
+
       function clearTimers() {
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
@@ -265,17 +282,33 @@
 
       // ---------- render ----------
       const cards = new Map();
+      const runCodes = new Map(); // execution id → full code sent by the server (for the expand button)
 
       function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 
       function ensureRunCard(id) {
         if (cards.has(id)) return cards.get(id);
         const card = el("div", "card");
-        card.appendChild(el("h3", null, "Execution " + id));
+        const head = el("div", "card-head");
+        head.appendChild(el("h3", null, "Execution " + id));
+        const expandBtn = el("button", "expand", "⤢ Code");
+        const code = el("pre", "code collapsed full", runCodes.get(id) || "(code not captured)");
+        expandBtn.onclick = () => {
+          const open = !code.classList.toggle("collapsed");
+          code.classList.toggle("full", open);
+          if (open) {
+            const src = runCodes.get(id);
+            if (src != null) code.textContent = src;
+          }
+          expandBtn.textContent = open ? "⤡ Hide" : "⤢ Code";
+        };
+        head.appendChild(expandBtn);
+        card.appendChild(head);
+        card.appendChild(code);
         const logs = el("pre", "logs");
         card.appendChild(logs);
         feed.appendChild(card);
-        const entry = { card, logs };
+        const entry = { card, logs, code, expandBtn };
         cards.set(id, entry);
         return entry;
       }
@@ -289,8 +322,11 @@
 
       function renderApproval(m) {
         const card = el("div", "card approval");
-        card.appendChild(el("h3", null, "⚠ Approval required — " + m.file));
-        card.appendChild(el("pre", "code", m.code));
+        const head = el("div", "card-head");
+        head.appendChild(el("h3", null, "⚠ Approval required — " + m.file));
+        card.appendChild(head);
+        const code = el("pre", "code full", m.code);
+        card.appendChild(code);
         card.appendChild(el("div", "meta", "timeout " + m.limits.timeoutMs + "ms · max " + m.limits.maxNodes + " nodes · " + m.limits.maxCommands + " commands"));
         const row = el("div", "row");
         const runBtn = el("button", "run", "Run");
@@ -299,8 +335,10 @@
         rejectBtn.onclick = () => { parent.postMessage({ pluginMessage: { kind: "approval", id: m.id, approved: false } }, "*"); row.remove(); appendLog(m.id, "✖ rejected by user", "err"); };
         row.appendChild(runBtn); row.appendChild(rejectBtn);
         card.appendChild(row);
+        const logs = el("pre", "logs");
+        card.appendChild(logs);
         feed.appendChild(card);
-        cards.set(m.id, { card, logs: null });
+        cards.set(m.id, { card, logs, code });
       }
       function markRunning(id) {
         const entry = cards.get(id);
