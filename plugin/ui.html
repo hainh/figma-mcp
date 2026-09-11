@@ -13,9 +13,11 @@
         --err: #e5534b;
         --warn: #d29922;
         --accent: #0d8a72;
+        --app-bd-rad: 13px;
       }
       * { box-sizing: border-box; margin: 0; padding: 0; font-size: 12px; }
       body { font-family: Inter, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+      body { border: 1px solid #e6e6e6; border-bottom-left-radius: var(--app-bd-rad); border-bottom-right-radius: var(--app-bd-rad); border-top: none; }
       header { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
       header .conn { flex: 1; }
       footer { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
