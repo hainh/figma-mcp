@@ -171,20 +171,21 @@ ENVIRONMENT
   figma.create* calls), maxCommands (default 10000 loop iterations). Batch edits instead of
   creating throwaway nodes.
 
-POLICY — rejected statically BEFORE running (fix code, don't retry as-is):
+POLICY — those codes will be rejected statically BEFORE running (avoid generating these codes, if encounter -> fix code, don't retry as-is):
 - Blocked identifiers: fetch, XMLHttpRequest, WebSocket, eval, Function, require, import(),
   globalThis, global, window, self, module, exports, process, WebAssembly, Atomics, SharedArrayBuffer.
   They are banned EVEN AS YOUR OWN variable/function names.
 - Blocked members: .constructor, .prototype, __proto__ (prototype-chain); figma.ui/showUI/
   settings/notify/on/off/once/emit/fileKey.
-- Dynamic computed access obj[expr] is blocked by design (static denylist can't resolve expr;
-  obj["con"+"structor"] would bypass it). Only string/number literals in brackets pass:
+- Dynamic computed member access obj[expr] is blocked; use static obj.prop or obj['prop']. Don't use f.children.forEach(c=>kids[c.name]=c);
+  Only string/number literals in brackets pass:
   obj['prop'], arr[0] are FINE; arr[i] with a variable/expression is a POLICY error.
   Rewrite indexed loops as:
     for (const child of node.children) {...}     // not: for (let i=0;i<n;i++) node.children[i]
     const v = arr.at(i)                          // not: arr[i]
     const { first, second } = arr                // destructuring
     list.map((x) => ...) / forEach / filter / find
+    const hdr=kids.find(c=>c.name==='StageHeader');
 - "this" is not allowed anywhere in your code — use arrow functions and closures.
 - No import/export statements, no with, no labeled statements.
 
