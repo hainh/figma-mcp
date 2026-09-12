@@ -72,58 +72,46 @@ figma.showUI(__html__, { width: 380, height: 520 });
  *
  * Pre-load every page before AI code runs. The plugin is intentionally allowed to use
  * lazy APIs; this guarantees generated code can never hit that cold-page error.
+ *
+ * IMPORTANT: with dynamic-page, Figma may UNLOAD pages at any time (memory pressure,
+ * page switches). A one-time background preload + permanent "loaded" cache goes stale
+ * and causes cold-page RUNTIME errors on the first call after idle. Therefore every
+ * execution re-runs `figma.loadAllPagesAsync()` — it is idempotent and cheap when
+ * everything is already loaded.
  */
-const loadedPageIds = new Set<string>();
 let pagesLoading: Promise<void> | null = null;
-
-function pendingPageNodes(): PageNode[] {
-  const pending: PageNode[] = [];
-  for (const page of figma.root.children) {
-    if (!loadedPageIds.has(page.id)) pending.push(page);
-  }
-  return pending;
-}
 
 async function loadOnePage(page: PageNode): Promise<void> {
   const loadPage = (page as unknown as { loadAsync?: () => Promise<void> }).loadAsync;
   if (typeof loadPage === "function") await loadPage.call(page);
-  loadedPageIds.add(page.id);
 }
 
 async function loadAllPagesViaBatchApi(): Promise<boolean> {
   const figmaWithLoadAll = figma as unknown as { loadAllPagesAsync?: () => Promise<void> };
   const loadAllPagesAsync = figmaWithLoadAll.loadAllPagesAsync;
   if (typeof loadAllPagesAsync !== "function") return false;
-
-  // Snapshot first: pages created while the batch load is in flight remain pending below.
-  const pagesBeforeBatch = Array.from(figma.root.children);
   await loadAllPagesAsync.call(figma);
-  for (const page of pagesBeforeBatch) loadedPageIds.add(page.id);
   return true;
 }
 
 async function doEnsurePagesLoaded(): Promise<void> {
-  const currentPage = figma.currentPage;
-  if (!loadedPageIds.has(currentPage.id)) {
-    await loadOnePage(currentPage);
-  }
+  // Always re-run the batch load — previous "loaded" state cannot be trusted because
+  // Figma auto-unloads pages in dynamic-page mode.
+  if (await loadAllPagesViaBatchApi()) return;
 
-  let triedBatchLoad = false;
+  // Fallback for builds without the batch API: load every page one by one, then
+  // re-scan (pages created mid-load stay pending) until the set is stable.
+  const loadedThisRun = new Set<string>();
   for (let pass = 0; pass < 20; pass++) {
-    const pending = pendingPageNodes();
+    const pending = figma.root.children.filter((p) => !loadedThisRun.has(p.id));
     if (pending.length === 0) return;
-
-    if (!triedBatchLoad) {
-      triedBatchLoad = true;
-      if (await loadAllPagesViaBatchApi()) continue;
-    }
-
     for (const page of pending) {
       await loadOnePage(page);
+      loadedThisRun.add(page.id);
     }
   }
 
-  const stillPending = pendingPageNodes().map((p) => p.id);
+  const stillPending = figma.root.children.filter((p) => !loadedThisRun.has(p.id)).map((p) => p.id);
   throw new Error(`Could not load ${stillPending.length} Figma page(s) before execution: ${stillPending.join(", ")}`);
 }
 
