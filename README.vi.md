@@ -68,7 +68,7 @@ Server lắng nghe:
 
 ### 2. Đăng ký plugin trong Figma (một lần)
 
-1. Mở Figma (web hoặc desktop app) → tạo file bất kỳ.
+1. Mở Figma (desktop app) → tạo file bất kỳ.
 2. `Plugins → Development → Import plugin from manifest…`
 3. Chọn file `figma-mcp/plugin/manifest.json`.
 4. Chạy plugin: `Plugins → Development → Figma MCP Connector`.
