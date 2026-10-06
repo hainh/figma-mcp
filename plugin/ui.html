@@ -17,14 +17,14 @@
       }
       * { box-sizing: border-box; margin: 0; padding: 0; font-size: 12px; }
       body { font-family: Inter, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
-      body { border: 1px solid #e6e6e6; border-bottom-left-radius: var(--app-bd-rad); border-bottom-right-radius: var(--app-bd-rad); border-top: none; }
+      body { border: 1px solid #e6e6e6; border-bottom-left-radius: var(--app-bd-rad); border-bottom-right-radius: var(--app-bd-rad); border-top: none; overflow: hidden; }
       header { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
       header .conn { flex: 1; }
       footer { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
       .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--err); flex-shrink: 0; }
       .dot.on { background: var(--ok); }
       #status { flex: 1; color: var(--dim); }
-      main { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+      main { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
       .card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
       .card.approval { border-color: var(--warn); }
       .card h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--dim); margin-bottom: 6px; }
@@ -50,8 +50,10 @@
       .expand:hover { color: var(--text); }
       pre.code.collapsed { display: none; }
       pre.code.full { max-height: none; }
-      body.minimized main { display: none; }
-      body.minimized footer { flex: 1; }
+      /* minimized: header + footer pinned to 50px each → exactly the 100px panel minimum;
+         the feed is squashed to 0 by flex (no display:none, no sliver, no gap) */
+      body.minimized header { height: 50px; }
+      body.minimized footer { height: 50px; }
     </style>
   </head>
   <body>
@@ -274,27 +276,38 @@
       const minmaxBtn = document.getElementById("minmax");
       const ICON_MIN = "_";   // feed visible → click minimizes
       const ICON_MAX = "▢";   // feed hidden → click restores (maximizes)
-      const RESIZE_ANIM_MS = 220; // keep in sync with UI_ANIM_MS in main.ts
+      const RESIZE_ANIM_MS = 350; // keep in sync with UI_ANIM_MS in main.ts
+      const FLIP_EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)"; // same curve as the panel zoom
+      const headerEl = document.querySelector("header");
+      const footerEl = document.querySelector("footer");
       let minimized = false;
-      let hideFeedTimer = null;
+
+      // .minimized pins header/footer to 50px (auto → 50px is discrete, not transitionable),
+      // which shifts their centered children. FLIP it: invert each child's jump with a
+      // transform (compositor-only, safe to animate), then glide back — starting the same
+      // instant as the window zoom, same duration + easing → header/footer content moves
+      // in sync with the feed collapse/expand.
+      function flipMinMax(add) {
+        const kids = [...headerEl.children, ...footerEl.children];
+        const before = kids.map((n) => n.getBoundingClientRect().top);
+        document.body.classList.toggle("minimized", add);
+        kids.forEach((n, i) => {
+          const dy = before[i] - n.getBoundingClientRect().top;
+          if (Math.abs(dy) < 0.5) return;
+          n.style.transition = "none";
+          n.style.transform = "translateY(" + dy + "px)";
+          void n.offsetWidth; // force reflow so the inverted position sticks
+          n.style.transition = "transform " + RESIZE_ANIM_MS + "ms " + FLIP_EASE;
+          n.style.transform = "";
+        });
+      }
+
       minmaxBtn.onclick = () => {
         minimized = !minimized;
         minmaxBtn.textContent = minimized ? ICON_MAX : ICON_MIN;
         minmaxBtn.title = minimized ? "Restore the feed" : "Minimize the feed";
-        if (hideFeedTimer) { clearTimeout(hideFeedTimer); hideFeedTimer = null; }
-        if (minimized) {
-          // window shrinks smoothly (main drives the steps); the feed (flex:1) collapses with it.
-          // hide the leftover sliver + stretch the footer only AFTER the window settles.
-          parent.postMessage({ pluginMessage: { kind: "minimize", minimized: true } }, "*");
-          hideFeedTimer = setTimeout(() => {
-            hideFeedTimer = null;
-            if (minimized) document.body.classList.add("minimized");
-          }, RESIZE_ANIM_MS + 12);
-        } else {
-          // unhide the feed first so it grows smoothly with the expanding window
-          document.body.classList.remove("minimized");
-          parent.postMessage({ pluginMessage: { kind: "minimize", minimized: false } }, "*");
-        }
+        flipMinMax(minimized); // heights + child glide apply BEFORE the window starts shrinking
+        parent.postMessage({ pluginMessage: { kind: "minimize", minimized } }, "*");
       };
 
       // ===== Clear button: drop every log card from the feed =====

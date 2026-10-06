@@ -66,7 +66,7 @@ interface InFlightRun {
 const UI_WIDTH = 380;
 const UI_HEIGHT = 520;
 const UI_MIN_HEIGHT = 100; // feed hidden (Figma enforces a 100px minimum)
-const UI_ANIM_MS = 220; // panel zoom animation duration — keep in sync with RESIZE_ANIM_MS in ui.html
+const UI_ANIM_MS = 350; // panel zoom animation duration — keep in sync with RESIZE_ANIM_MS in ui.html
 figma.showUI(__html__, { width: UI_WIDTH, height: UI_HEIGHT });
 
 /**
