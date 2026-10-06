@@ -69,26 +69,49 @@ const UI_MIN_HEIGHT = 100; // feed hidden (Figma enforces a 100px minimum)
 const UI_ANIM_MS = 220; // panel zoom animation duration — keep in sync with RESIZE_ANIM_MS in ui.html
 figma.showUI(__html__, { width: UI_WIDTH, height: UI_HEIGHT });
 
+/**
+ * Cubic-bezier timing function, CSS-equivalent (Newton-Raphson solve for x → y).
+ * (0.2, 0.8, 0.2, 1): fast launch, long soft settle.
+ */
+function makeBezier(x1: number, y1: number, x2: number, y2: number): (x: number) => number {
+  const cx = 3 * x1; const bx = 3 * (x2 - x1) - cx; const ax = 1 - cx - bx;
+  const cy = 3 * y1; const by = 3 * (y2 - y1) - cy; const ay = 1 - cy - by;
+  const sampleX = (t: number): number => ((ax * t + bx) * t + cx) * t;
+  const sampleY = (t: number): number => ((ay * t + by) * t + cy) * t;
+  const slopeX = (t: number): number => (3 * ax * t + 2 * bx) * t + cx;
+  return (x: number): number => {
+    let t = x;
+    for (let i = 0; i < 8; i++) {
+      const err = sampleX(t) - x;
+      if (Math.abs(err) < 1e-4) break;
+      const d = slopeX(t);
+      if (Math.abs(d) < 1e-6) break;
+      t -= err / d;
+    }
+    return sampleY(Math.min(1, Math.max(0, t)));
+  };
+}
+const UI_EASE = makeBezier(0.2, 0.8, 0.2, 1);
+
 let panelHeight = UI_HEIGHT;
 let resizeAnim: ReturnType<typeof setInterval> | null = null;
 
 /**
  * Eased panel resize. Figma's `figma.ui.resize` is instant (CSS cannot animate the
- * panel box), so we drive it through a short rAF-like step loop; the feed (`flex:1`
- * in the UI) follows each step, giving a smooth zoom-in/zoom-out.
+ * panel box), so we drive it through a short step loop; the feed (`flex:1` in the UI)
+ * follows each step, giving a smooth zoom-in/zoom-out.
  */
 function resizeSmooth(to: number): void {
   if (resizeAnim) { clearInterval(resizeAnim); resizeAnim = null; }
   const from = panelHeight;
   if (from === to) { figma.ui.resize(UI_WIDTH, to); return; }
   const steps = Math.max(1, Math.round(UI_ANIM_MS / 16));
-  const ease = (t: number): number => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
   let i = 0;
   resizeAnim = setInterval(() => {
     i++;
-    const t = Math.min(1, i / steps);
-    panelHeight = Math.round(from + (to - from) * ease(t));
-    figma.ui.resize(UI_WIDTH, panelHeight);
+    const h = Math.round(from + (to - from) * UI_EASE(Math.min(1, i / steps)));
+    panelHeight = h;
+    figma.ui.resize(UI_WIDTH, h);
     if (i >= steps) {
       if (resizeAnim) { clearInterval(resizeAnim); resizeAnim = null; }
       panelHeight = to;
