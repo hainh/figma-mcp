@@ -34,7 +34,7 @@
       pre.logs .ok { color: var(--ok); }
       .row { display: flex; gap: 8px; margin-top: 8px; }
       button { border: none; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-weight: 600; }
-      header button { padding: 4px 10px; font-size: 11px; flex-shrink: 0; }
+      header button { padding: 4px 9px; font-size: 12px; flex-shrink: 0; line-height: 1; }
       .run { background: var(--accent); color: white; }
       .reject { background: #4a4a4a; color: var(--text); }
       .meta { color: var(--dim); margin-top: 6px; }
@@ -51,6 +51,7 @@
       pre.code.collapsed { display: none; }
       pre.code.full { max-height: none; }
       body.minimized main { display: none; }
+      body.minimized footer { flex: 1; }
     </style>
   </head>
   <body>
@@ -58,9 +59,9 @@
       <div class="conn" title="WebSocket port of figma-mcp (= 10060 + server id). Example: figma-mcp 1 → 10061, figma-mcp 2 → 10062. One plugin connects to one port only — edit the field (Enter) to change it.">
         <span class="port-label">MCP server port</span>
         <input type="number" id="port" min="1" max="65535" step="1" value="10060" />
-        <button id="reconnect" class="save" title="Close the current connection and reconnect to the same port">↻ Reconnect</button>
+        <button id="reconnect" class="save" title="Close the current connection and reconnect to the same port">↻</button>
       </div>
-      <button id="clear" class="save" title="Remove all log cards from the feed">🗑 Clear</button>
+      <button id="clear" class="save" title="Remove all log cards from the feed">🗑</button>
       <button id="minmax" class="save" title="Minimize / restore the feed">-</button>
     </header>
     <main id="feed"></main>
