@@ -24,7 +24,8 @@ type UiToMainMessage =
   | { kind: "ws-closed" }
   | { kind: "ws-message"; data: string }
   | { kind: "approval"; id: string; approved: boolean }
-  | { kind: "set-port"; value: unknown };
+  | { kind: "set-port"; value: unknown }
+  | { kind: "minimize"; minimized: boolean };
 
 /** Message server → plugin (over the UI websocket). */
 type ServerMessage =
@@ -62,7 +63,10 @@ interface InFlightRun {
   state: RunState;
 }
 
-figma.showUI(__html__, { width: 380, height: 520 });
+const UI_WIDTH = 380;
+const UI_HEIGHT = 520;
+const UI_MIN_HEIGHT = 100; // feed hidden (Figma enforces a 100px minimum)
+figma.showUI(__html__, { width: UI_WIDTH, height: UI_HEIGHT });
 
 // ==================== dynamic-page safety ====================
 /**
@@ -221,6 +225,11 @@ figma.ui.onmessage = async (msg: UiToMainMessage) => {
       wsPort = next;
       notifyUi({ kind: "port-changed", port: next, defaultPort: DEFAULT_WS_PORT });
       figma.clientStorage.setAsync(WS_PORT_KEY, next).catch(() => {});
+      return;
+    }
+
+    case "minimize": {
+      figma.ui.resize(UI_WIDTH, msg.minimized ? UI_MIN_HEIGHT : UI_HEIGHT);
       return;
     }
   }

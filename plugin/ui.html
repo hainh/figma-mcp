@@ -50,6 +50,7 @@
       .expand:hover { color: var(--text); }
       pre.code.collapsed { display: none; }
       pre.code.full { max-height: none; }
+      body.minimized main { display: none; }
     </style>
   </head>
   <body>
@@ -60,6 +61,7 @@
         <button id="reconnect" class="save" title="Close the current connection and reconnect to the same port">↻ Reconnect</button>
       </div>
       <button id="clear" class="save" title="Remove all log cards from the feed">🗑 Clear</button>
+      <button id="minmax" class="save" title="Minimize / restore the feed">-</button>
     </header>
     <main id="feed"></main>
     <footer>
@@ -265,6 +267,15 @@
         failedTries = 0;
         setStatus(false, "Reconnecting…");
         connect(); // onopen reports ws-reconnected → main sends a fresh hello
+      };
+
+      // ===== Minimize/restore button: hide the feed and shrink the plugin window =====
+      const minmaxBtn = document.getElementById("minmax");
+      let minimized = false;
+      minmaxBtn.onclick = () => {
+        minimized = !minimized;
+        document.body.classList.toggle("minimized", minimized);
+        parent.postMessage({ pluginMessage: { kind: "minimize", minimized } }, "*");
       };
 
       // ===== Clear button: drop every log card from the feed =====
