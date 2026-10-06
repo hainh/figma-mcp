@@ -66,7 +66,36 @@ interface InFlightRun {
 const UI_WIDTH = 380;
 const UI_HEIGHT = 520;
 const UI_MIN_HEIGHT = 100; // feed hidden (Figma enforces a 100px minimum)
+const UI_ANIM_MS = 220; // panel zoom animation duration — keep in sync with RESIZE_ANIM_MS in ui.html
 figma.showUI(__html__, { width: UI_WIDTH, height: UI_HEIGHT });
+
+let panelHeight = UI_HEIGHT;
+let resizeAnim: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Eased panel resize. Figma's `figma.ui.resize` is instant (CSS cannot animate the
+ * panel box), so we drive it through a short rAF-like step loop; the feed (`flex:1`
+ * in the UI) follows each step, giving a smooth zoom-in/zoom-out.
+ */
+function resizeSmooth(to: number): void {
+  if (resizeAnim) { clearInterval(resizeAnim); resizeAnim = null; }
+  const from = panelHeight;
+  if (from === to) { figma.ui.resize(UI_WIDTH, to); return; }
+  const steps = Math.max(1, Math.round(UI_ANIM_MS / 16));
+  const ease = (t: number): number => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+  let i = 0;
+  resizeAnim = setInterval(() => {
+    i++;
+    const t = Math.min(1, i / steps);
+    panelHeight = Math.round(from + (to - from) * ease(t));
+    figma.ui.resize(UI_WIDTH, panelHeight);
+    if (i >= steps) {
+      if (resizeAnim) { clearInterval(resizeAnim); resizeAnim = null; }
+      panelHeight = to;
+      figma.ui.resize(UI_WIDTH, to);
+    }
+  }, 16);
+}
 
 // ==================== dynamic-page safety ====================
 /**
@@ -229,7 +258,7 @@ figma.ui.onmessage = async (msg: UiToMainMessage) => {
     }
 
     case "minimize": {
-      figma.ui.resize(UI_WIDTH, msg.minimized ? UI_MIN_HEIGHT : UI_HEIGHT);
+      resizeSmooth(msg.minimized ? UI_MIN_HEIGHT : UI_HEIGHT);
       return;
     }
   }

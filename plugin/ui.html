@@ -274,13 +274,27 @@
       const minmaxBtn = document.getElementById("minmax");
       const ICON_MIN = "_";   // feed visible → click minimizes
       const ICON_MAX = "▢";   // feed hidden → click restores (maximizes)
+      const RESIZE_ANIM_MS = 220; // keep in sync with UI_ANIM_MS in main.ts
       let minimized = false;
+      let hideFeedTimer = null;
       minmaxBtn.onclick = () => {
         minimized = !minimized;
-        document.body.classList.toggle("minimized", minimized);
         minmaxBtn.textContent = minimized ? ICON_MAX : ICON_MIN;
         minmaxBtn.title = minimized ? "Restore the feed" : "Minimize the feed";
-        parent.postMessage({ pluginMessage: { kind: "minimize", minimized } }, "*");
+        if (hideFeedTimer) { clearTimeout(hideFeedTimer); hideFeedTimer = null; }
+        if (minimized) {
+          // window shrinks smoothly (main drives the steps); the feed (flex:1) collapses with it.
+          // hide the leftover sliver + stretch the footer only AFTER the window settles.
+          parent.postMessage({ pluginMessage: { kind: "minimize", minimized: true } }, "*");
+          hideFeedTimer = setTimeout(() => {
+            hideFeedTimer = null;
+            if (minimized) document.body.classList.add("minimized");
+          }, RESIZE_ANIM_MS + 12);
+        } else {
+          // unhide the feed first so it grows smoothly with the expanding window
+          document.body.classList.remove("minimized");
+          parent.postMessage({ pluginMessage: { kind: "minimize", minimized: false } }, "*");
+        }
       };
 
       // ===== Clear button: drop every log card from the feed =====
