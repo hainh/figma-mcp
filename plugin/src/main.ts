@@ -117,7 +117,7 @@ function resizeSmooth(to: number): void {
       panelHeight = to;
       figma.ui.resize(UI_WIDTH, to);
     }
-  }, 16);
+  }, 10);
 }
 
 // ==================== dynamic-page safety ====================
