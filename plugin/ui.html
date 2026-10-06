@@ -41,6 +41,7 @@
       /* footer { padding: 8px 12px; border-top: 1px solid var(--border); color: var(--dim); } */
       .conn { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
       input[type="number"] { width: 74px; background: #171717; color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-size: 11px; }
+      input[type="checkbox"] { width: 13px; height: 13px; flex-shrink: 0; accent-color: var(--accent); cursor: pointer; }
       input[type="number"]:focus { outline: 1px solid var(--accent); }
       .port-label { color: var(--dim); font-size: 11px; }
       .save { background: #3a3a3a; color: var(--text); }
@@ -61,6 +62,7 @@
         <input type="number" id="port" min="1" max="65535" step="1" value="10060" />
         <button id="reconnect" class="save" title="Close the current connection and reconnect to the same port">↻</button>
       </div>
+      <input type="checkbox" id="validate" title="Validate code" />
       <button id="clear" class="save" title="Remove all log cards from the feed">🗑</button>
       <button id="minmax" class="save" title="Minimize the feed">_</button>
     </header>
@@ -85,6 +87,7 @@
       const statusEl = document.getElementById("status");
       const feed = document.getElementById("feed");
       const portInput = document.getElementById("port");
+      const validateInput = document.getElementById("validate"); // unchecked by default → validation OFF
 
       let ws = null;
       let pingTimer = null;
@@ -210,8 +213,9 @@
             else if (m.status === "connected") setStatus(true, "Connected · ws://localhost:" + wsPort + " · " + m.server);
             else if (m.status === "closed") setStatus(false, "Disconnected — retrying…");
             break;
-          case "config": // main sends the persisted port (clientStorage)
+          case "config": // main sends the persisted port + validate flag (clientStorage)
             applyPort(m.port, { fromMain: true });
+            if (typeof m.validate === "boolean") validateInput.checked = m.validate;
             break;
           case "port-changed":
             applyPort(m.port, { fromMain: true });
@@ -281,6 +285,11 @@
         minmaxBtn.textContent = minimized ? ICON_MAX : ICON_MIN;
         minmaxBtn.title = minimized ? "Restore the feed" : "Minimize the feed";
         parent.postMessage({ pluginMessage: { kind: "minimize", minimized } }, "*");
+      };
+
+      // ===== Validate-code toggle: enable/disable validateAndInstrument in the main thread =====
+      validateInput.onchange = () => {
+        parent.postMessage({ pluginMessage: { kind: "set-validate", value: validateInput.checked } }, "*");
       };
 
       // ===== Clear button: drop every log card from the feed =====

@@ -1,6 +1,7 @@
 /**
  * Sandboxed executor — chạy code ĐÃ ĐƯỢC validateAndInstrument() biến đổi.
- * KHÔNG BAO GIỜ gọi hàm này với code chưa qua validator.
+ * KHÔNG BAO GIỜ gọi hàm này với code chưa qua validator — NGOẠI LỆ: hooks.validate === false
+ * (UI tắt checkbox "Validate code") → raw code được chạy thẳng, loop không có guard tick.
  *
  * Environment inject vào `new Function`:
  *   figma    → sandbox object kế thừa figma.* (Object.create — ĐỪNG dùng new Proxy,
@@ -9,7 +10,7 @@
  *   helpers  → createText (auto load font), ...
  *   __guard  → tick() được AST chèn vào mọi loop: timeout / cancel / budget
  */
-import { validateAndInstrument, ValidationError, type ValidationProblem } from "./validator.ts";
+import { validateAndInstrument, ValidationError, type ValidationProblem, type InstrumentedCode } from "./validator.ts";
 
 export class ExecutionError extends Error {
   code: string;
@@ -73,6 +74,8 @@ export type RunResult =
 export interface RunHooks {
   onLog?: (entry: LogEntry) => void;
   control?: ControlToken;
+  /** false → bỏ qua validateAndInstrument (chạy raw code, không instrument loop). Mặc định: validate. */
+  validate?: boolean;
 }
 
 interface Color {
@@ -295,15 +298,20 @@ export async function runCode(rawCode: string, limits: Limits, hooks: RunHooks =
   };
 
   // ---- validate + instrument (LẠI MỘT LẦN NỮA, ngay trước khi chạy — defense in depth) ----
-  let prepared;
-  try {
-    prepared = validateAndInstrument(rawCode);
-  } catch (e) {
-    if (e instanceof ValidationError) {
-      return { ok: false, code: "POLICY", error: e.message, problems: e.problems, createdNodes, logs: logs.map(renderLog) };
+  // Bỏ qua khi UI tắt checkbox "Validate code" (hooks.validate === false).
+  let prepared: InstrumentedCode;
+  if (hooks.validate === false) {
+    prepared = { code: rawCode, loopsInstrumented: 0 };
+  } else {
+    try {
+      prepared = validateAndInstrument(rawCode);
+    } catch (e) {
+      if (e instanceof ValidationError) {
+        return { ok: false, code: "POLICY", error: e.message, problems: e.problems, createdNodes, logs: logs.map(renderLog) };
+      }
+      const err = e as { message?: string };
+      return { ok: false, code: "SYNTAX", error: String(err?.message || e), createdNodes, logs: logs.map(renderLog) };
     }
-    const err = e as { message?: string };
-    return { ok: false, code: "SYNTAX", error: String(err?.message || e), createdNodes, logs: logs.map(renderLog) };
   }
 
   // ---- execute ----
