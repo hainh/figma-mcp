@@ -62,7 +62,7 @@
         <button id="reconnect" class="save" title="Close the current connection and reconnect to the same port">↻</button>
       </div>
       <button id="clear" class="save" title="Remove all log cards from the feed">🗑</button>
-      <button id="minmax" class="save" title="Minimize / restore the feed">-</button>
+      <button id="minmax" class="save" title="Minimize the feed">_</button>
     </header>
     <main id="feed"></main>
     <footer>
@@ -272,10 +272,14 @@
 
       // ===== Minimize/restore button: hide the feed and shrink the plugin window =====
       const minmaxBtn = document.getElementById("minmax");
+      const ICON_MIN = "_";   // feed visible → click minimizes
+      const ICON_MAX = "▢";   // feed hidden → click restores (maximizes)
       let minimized = false;
       minmaxBtn.onclick = () => {
         minimized = !minimized;
         document.body.classList.toggle("minimized", minimized);
+        minmaxBtn.textContent = minimized ? ICON_MAX : ICON_MIN;
+        minmaxBtn.title = minimized ? "Restore the feed" : "Minimize the feed";
         parent.postMessage({ pluginMessage: { kind: "minimize", minimized } }, "*");
       };
 
