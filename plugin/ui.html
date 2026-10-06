@@ -50,9 +50,8 @@
       .expand:hover { color: var(--text); }
       pre.code.collapsed { display: none; }
       pre.code.full { max-height: none; }
-      /* minimized: header + footer pinned to 50px each → exactly the 100px panel minimum;
-         the feed is squashed to 0 by flex (no display:none, no sliver, no gap) */
-      body.minimized header { height: 50px; }
+      /* minimized: footer pinned to 50px; header keeps its natural height;
+         the feed is squashed by flex */
       body.minimized footer { height: 50px; }
     </style>
   </head>
