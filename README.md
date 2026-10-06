@@ -68,7 +68,7 @@ The server listens on:
 
 ### 2. Register the plugin in Figma (one time)
 
-1. Open Figma (web or desktop app) → create any file.
+1. Open Figma (desktop app) → create any file.
 2. `Plugins → Development → Import plugin from manifest…`
 3. Select the file `figma-mcp/plugin/manifest.json`.
 4. Run the plugin: `Plugins → Development → Figma MCP Connector`.
