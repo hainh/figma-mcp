@@ -13,6 +13,7 @@ const PLUGIN_VERSION = "0.1.0";
 /** Default WebSocket port of the MCP server (plugin side) = 10060 + serverId. */
 const DEFAULT_WS_PORT = 10060;
 const WS_PORT_KEY = "wsPort";
+const VALIDATE_KEY = "validateCode";
 
 // ==================== protocol types ====================
 
@@ -25,6 +26,7 @@ type UiToMainMessage =
   | { kind: "ws-message"; data: string }
   | { kind: "approval"; id: string; approved: boolean }
   | { kind: "set-port"; value: unknown }
+  | { kind: "set-validate"; value: unknown }
   | { kind: "minimize"; minimized: boolean };
 
 /** Message server → plugin (over the UI websocket). */
@@ -201,19 +203,22 @@ figma.on("currentpagechange", () => {
 /** Bridge port chosen by the user (persisted via clientStorage) — the UI connects to this port. */
 let wsPort = DEFAULT_WS_PORT;
 
+/** Toggle for validateAndInstrument (header checkbox, OFF by default) — persisted via clientStorage. */
+let validateEnabled = false;
+
 /** Auto-run is always ON — no toggle in the UI, every run executes immediately. */
 const autoRun = true;
 
-figma.clientStorage
-  .getAsync(WS_PORT_KEY)
-  .then((v) => {
-    const port = normalizePort(v);
+Promise.all([figma.clientStorage.getAsync(WS_PORT_KEY), figma.clientStorage.getAsync(VALIDATE_KEY)])
+  .then(([savedPort, savedValidate]) => {
+    const port = normalizePort(savedPort);
     if (port !== wsPort) wsPort = port;
+    if (typeof savedValidate === "boolean") validateEnabled = savedValidate;
     // The UI waits for this config to know which port to connect to (fallback: DEFAULT_WS_PORT in the UI)
-    notifyUi({ kind: "config", port: wsPort, defaultPort: DEFAULT_WS_PORT });
+    notifyUi({ kind: "config", port: wsPort, defaultPort: DEFAULT_WS_PORT, validate: validateEnabled });
   })
   .catch(() => {
-    notifyUi({ kind: "config", port: wsPort, defaultPort: DEFAULT_WS_PORT });
+    notifyUi({ kind: "config", port: wsPort, defaultPort: DEFAULT_WS_PORT, validate: validateEnabled });
   });
 
 /** execId → run that is awaiting approval or currently running */
@@ -277,6 +282,12 @@ figma.ui.onmessage = async (msg: UiToMainMessage) => {
       wsPort = next;
       notifyUi({ kind: "port-changed", port: next, defaultPort: DEFAULT_WS_PORT });
       figma.clientStorage.setAsync(WS_PORT_KEY, next).catch(() => {});
+      return;
+    }
+
+    case "set-validate": {
+      validateEnabled = msg.value === true;
+      figma.clientStorage.setAsync(VALIDATE_KEY, validateEnabled).catch(() => {});
       return;
     }
 
@@ -356,20 +367,23 @@ function onExecuteRequest(msg: Extract<ServerMessage, { type: "execute" }>): voi
   inFlight.set(id, run);
 
   // Quick pre-validation to surface errors early in the UI + save an approval round-trip for garbage code
-  try {
-    validateAndInstrument(code);
-  } catch (e) {
-    inFlight.delete(id);
-    const err = e as ValidationError;
-    sendResult({
-      type: "result",
-      id,
-      ok: false,
-      code: err.code || "POLICY",
-      error: String(err.message || e),
-      logs: [],
-    });
-    return;
+  // (skipped when the "Validate code" checkbox is OFF).
+  if (validateEnabled) {
+    try {
+      validateAndInstrument(code);
+    } catch (e) {
+      inFlight.delete(id);
+      const err = e as ValidationError;
+      sendResult({
+        type: "result",
+        id,
+        ok: false,
+        code: err.code || "POLICY",
+        error: String(err.message || e),
+        logs: [],
+      });
+      return;
+    }
   }
 
   if (autoRun) {
@@ -423,6 +437,7 @@ async function startExecution(run: InFlightRun): Promise<void> {
     undoOpened = true;
     const result = await runCode(code, limits, {
       control,
+      validate: validateEnabled,
       onLog: (entry) => sendResult({ type: "log", id, level: entry.level, args: entry.args, logs: [] }),
     });
     inFlight.delete(id);
